@@ -593,7 +593,24 @@
 
       async function loadFromServer(){ try { const res = await apiGet(`/schedule?team=${encodeURIComponent(team)}&start=${start}&end=${end}`); setEmployees(res.employees||[]); setData(res.data||{}); setVersionId(res.version_id||null); if(res.rest_prefs){ setRestPrefs(sanitizeRestPrefsMap(res.rest_prefs)); } if(res.night_rules || res.nightRules){ setNightRules(normalizeNightRules(res.night_rules||res.nightRules)); } if(typeof res.mixMax==='number'){ setMixMax(res.mixMax); } tryRestoreRestForView(); } catch(e){ globalErr(e.message); } }
       async function saveToServer(){ try{ const operator = (user && (user.display_name || user.username)) || '管理员'; const safeNightRules = normalizeNightRules(nightRules); const body = { team, viewStart:start, viewEnd:end, employees, data, baseVersionId: versionId, note, operator, adminDays, restPrefs, nightRules: safeNightRules, rMin,rMax,pMin,pMax, mixMax }; const res = await apiPost('/schedule/save', body); setVersionId(res.version_id||null);} catch(e){ if(e.payload && e.payload.code===409){ if(confirm('服务器已有新版本，是否加载最新并覆盖？')) await loadFromServer(); return; } globalErr(e.message); } }
-      async function loadVersions(){ try{ const res = await apiGet(`/schedule/versions?team=${encodeURIComponent(team)}`); setVersions(res.versions||[]); } catch(e){ globalErr(e.message); } }
+      async function loadVersions(){
+        try{
+          const trimmedTeam = (team || '').trim();
+          if(!trimmedTeam){
+            globalErr('请先填写团队名称后再刷新历史版本');
+            return;
+          }
+          const params = new URLSearchParams();
+          params.set('team', trimmedTeam);
+          // 使用极宽的时间窗口，满足服务端参数要求的同时拿到全部历史记录。
+          params.set('start', '1970-01-01');
+          params.set('end', '2100-12-31');
+          const res = await apiGet(`/schedule/versions?${params.toString()}`);
+          setVersions(res.versions||[]);
+        } catch(e){
+          globalErr(e.message);
+        }
+      }
       async function loadVersionById(id){ try{ const res = await apiGet(`/version?id=${id}`); setEmployees(res.employees||[]); setData(res.data||{}); setVersionId(id); if(res.rest_prefs){ setRestPrefs(sanitizeRestPrefsMap(res.rest_prefs)); } if(res.night_rules || res.nightRules){ setNightRules(normalizeNightRules(res.night_rules||res.nightRules)); } if(typeof res.mixMax==='number'){ setMixMax(res.mixMax); } tryRestoreRestForView(); } catch(e){ globalErr(e.message); } }
       async function doLogout(){ try{ await apiPost('/logout',{}); setUser(null);}catch{} }
       function exportExcel(){ const url = `${API_BASE}/export/xlsx?team=${encodeURIComponent(team)}&start=${start}&end=${end}`; window.location.href=url; }
