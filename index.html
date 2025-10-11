@@ -12,10 +12,13 @@
     .grid-wrap { height: calc(100vh - 260px); overflow: auto; }
     th.sticky { position: sticky; top: 0; background: rgb(249 250 251/0.95); z-index: 3; backdrop-filter: blur(4px); }
     td, th { white-space: nowrap; }
-    input.cell { width: 6rem; padding-right: 1.5rem; }
+    input.cell { width: 6rem; padding-right: 1.75rem; }
     .cell-wrap { position: relative; }
-    .cell-toggle { position: absolute; right: .25rem; top: .45rem; font-size: 12px; line-height: 1; color: #9ca3af; }
-    .cell-toggle:hover { color: #4b5563; }
+    .cell-toggle { position: absolute; right: .25rem; top: .35rem; width: 1.5rem; height: 1.5rem; font-size: 0; color: transparent; background: transparent; border: none; cursor: pointer; }
+    .cell-toggle:focus-visible { outline: 2px solid rgb(129 140 248); outline-offset: 2px; }
+    .cell-toggle:disabled { cursor: not-allowed; }
+    .cell-toggle::after { content: ''; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
     #errbar { display:none; }
     #errbar.show { display:block; }
     .left-sticky { position: sticky; left: 0; z-index: 2; background: white; }
@@ -70,6 +73,27 @@
     function enumerateDates(start, end){ const out=[]; let d=new Date(start); const e=new Date(end); while(d<=e){ out.push(fmt(d)); d.setDate(d.getDate()+1); } return out; }
     function dow(ymd){ return new Date(ymd).getDay(); }
     function dateAdd(ymd, delta){ const d=new Date(ymd); d.setDate(d.getDate()+delta); return fmt(d); }
+    function monthListBetween(start, end){
+      const startDate = new Date(start);
+      const endDate = new Date(end);
+      const cur = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+      const out = [];
+      while(cur <= endDate){
+        const key = `${cur.getFullYear()}-${String(cur.getMonth()+1).padStart(2,'0')}`;
+        const label = `${cur.getFullYear()}年${String(cur.getMonth()+1).padStart(2,'0')}月`;
+        const monthStart = fmt(cur);
+        const monthEnd = fmt(new Date(cur.getFullYear(), cur.getMonth()+1, 0));
+        out.push({ key, label, start: monthStart, end: monthEnd });
+        cur.setMonth(cur.getMonth()+1);
+      }
+      return out;
+    }
+    function weekStartKey(day){
+      const d = new Date(day);
+      const mondayIdx = (d.getDay()+6)%7;
+      d.setDate(d.getDate()-mondayIdx);
+      return fmt(d);
+    }
 
     async function apiGet(path){ const r = await fetch(API_BASE + path, { credentials: 'include' }); if(!r.ok){ let msg='请求失败'; try { const e=await r.json(); msg=e.message||msg; } catch{} throw new Error(msg); } return r.json(); }
     async function apiPost(path, body){ const r = await fetch(API_BASE + path, { method: 'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify(body||{}), credentials: 'include' }); if(!r.ok){ let ejson=null; try { ejson = await r.json(); } catch{} const err = new Error((ejson&&ejson.message)||'请求失败'); if(ejson) err.payload = ejson; throw err; } return r.json(); }
@@ -378,7 +402,8 @@
       function setCellByIndex(dIndex, eIndex, value){ const d = dateList[dIndex]; const emp = employees[eIndex]; if(!d||!emp) return; setData(prev=>{ const next = { ...prev }; const row = { ...(next[d]||{}) }; row[emp] = value; next[d] = row; return next; }); }
       function onFocusCell(dIndex, eIndex){ activeCellRef.current = { dIndex, eIndex }; }
       function moveActive(dx, dy){ const cur = activeCellRef.current || { dIndex:0, eIndex:0 }; const ni = Math.max(0, Math.min((cur.dIndex||0) + dy, dateList.length-1)); const nj = Math.max(0, Math.min((cur.eIndex||0) + dx, employees.length-1)); activeCellRef.current = { dIndex: ni, eIndex: nj }; const id = `cell-${ni}-${nj}`; const el = document.getElementById(id); if(el) el.focus(); }
-      function onKeyDownCell(e){ if(e.isComposing) return; if(e.key==='Enter'){ e.preventDefault(); moveActive(1,0); } else if(e.key==='ArrowRight'){ e.preventDefault(); moveActive(1,0); } else if(e.key==='ArrowLeft'){ e.preventDefault(); moveActive(-1,0); } else if(e.key==='ArrowDown'){ e.preventDefault(); moveActive(0,1); } else if(e.key==='ArrowUp'){ e.preventDefault(); moveActive(0,-1); } }
+      function openPickerAt(di, ei, anchorEl){ if(editingLocked) return; const el = anchorEl || document.getElementById(`cell-${di}-${ei}`); if(!el) return; const rect = el.getBoundingClientRect(); setPicker({ open:true, di, ei, x: rect.left + window.scrollX, y: rect.bottom + window.scrollY + 4 }); }
+      function onKeyDownCell(e, di, ei){ if(e.isComposing) return; if(e.altKey && (e.key==='ArrowDown' || e.key==='Enter')){ e.preventDefault(); openPickerAt(di, ei, e.currentTarget); return; } if(e.key==='Enter'){ e.preventDefault(); moveActive(1,0); } else if(e.key==='ArrowRight'){ e.preventDefault(); moveActive(1,0); } else if(e.key==='ArrowLeft'){ e.preventDefault(); moveActive(-1,0); } else if(e.key==='ArrowDown'){ e.preventDefault(); moveActive(0,1); } else if(e.key==='ArrowUp'){ e.preventDefault(); moveActive(0,-1); } }
 
       function clearRange(mode='empty'){
         setData(prev=>{ const next={...prev}; for(const d of dateList){ const r={...(next[d]||{})}; for(const e of employees){ r[e] = (mode==='rest')? '休' : ''; } next[d]=r; } return next; });
@@ -451,13 +476,13 @@
                                     style={{ backgroundColor: bg }} value={v}
                                     disabled={editingLocked}
                                     title={editingLocked? '执行中：只读' : ''}
-                                    onFocus={()=>onFocusCell(di,ei)} onKeyDown={onKeyDownCell}
+                                    onFocus={()=>onFocusCell(di,ei)} onKeyDown={(ev)=> onKeyDownCell(ev, di, ei)}
                                     onCompositionStart={(ev)=>{ ev.target.isComposing = true; }}
                                     onCompositionEnd={(ev)=>{ ev.target.isComposing = false; setCellByIndex(di, ei, ev.currentTarget.value); }}
-                                    onChange={ev=> setCellByIndex(di, ei, ev.target.value)} placeholder="白/中1/中2/夜/休 或留空" />
+                                    onChange={ev=> setCellByIndex(di, ei, ev.target.value)} onDoubleClick={(ev)=>{ if(editingLocked) return; openPickerAt(di, ei, ev.currentTarget); }} placeholder="白/中1/中2/夜/休 或留空" />
                                   <button className="cell-toggle" disabled={editingLocked} aria-label="选择班次" title="选择班次"
-                                    onClick={(ev)=>{ ev.preventDefault(); ev.stopPropagation(); const el=document.getElementById(`cell-${di}-${ei}`); if(!el) return; const rect=el.getBoundingClientRect(); setPicker({ open:true, di, ei, x: rect.left + window.scrollX, y: rect.bottom + window.scrollY + 4 }); }}>
-                                    ▾
+                                    onClick={(ev)=>{ ev.preventDefault(); ev.stopPropagation(); openPickerAt(di, ei); }}>
+                                    <span className="sr-only">打开班次选择器</span>
                                   </button>
                                 </div>
                               </td>
@@ -685,6 +710,7 @@
       const ViewStats = (()=>{
         const ranges = periodRanges();
         const [statPeriod, setStatPeriod] = useState('r');
+        const [statView, setStatView] = useState('person');
         const [orderBy, setOrderBy] = useState('default');
         const cur = statPeriod==='y'? ranges.y : statPeriod==='q'? ranges.q : statPeriod==='m'? ranges.m : ranges.r;
         const daysLen = useMemo(()=> enumerateDates(cur.s, cur.e).length, [cur.s, cur.e]);
@@ -692,6 +718,7 @@
         const avg = useMemo(()=>{ const sum={白:0,中1:0,中2:0,夜:0,总:0}; for(const e of employees){ sum.白+=C[e]?.白||0; sum.中1+=C[e]?.中1||0; sum.中2+=C[e]?.中2||0; sum.夜+=C[e]?.夜||0; sum.总+=C[e]?.总||0; } const n = Math.max(1, employees.length); return { 白:(sum.白/n).toFixed(1), 中1:(sum.中1/n).toFixed(1), 中2:(sum.中2/n).toFixed(1), 夜:(sum.夜/n).toFixed(1), 总:(sum.总/n).toFixed(1) }; }, [employees, C]);
 
         // —— 新增：每日分布与总和分析 ——
+        const monthSpans = useMemo(()=> monthListBetween(cur.s, cur.e), [cur.s, cur.e]);
         const daySeries = useMemo(()=>{
           const list = enumerateDates(cur.s, cur.e);
           return list.map(d=>{
@@ -699,9 +726,59 @@
           });
         }, [data, employees, cur.s, cur.e]);
         const sumTotals = useMemo(()=> daySeries.reduce((acc,s)=>{ acc.白+=s.W; acc.中1+=s.M; acc.中2+=s.N2; acc.夜+=s.N; acc.总+=s.total; return acc; }, {白:0,中1:0,中2:0,夜:0,总:0}), [daySeries]);
+        const totalDays = daySeries.length;
+        const dailyAvg = {
+          总: totalDays? (sumTotals.总/totalDays).toFixed(1) : '0.0',
+          白: totalDays? (sumTotals.白/totalDays).toFixed(1) : '0.0',
+          中1: totalDays? (sumTotals.中1/totalDays).toFixed(1) : '0.0'
+        };
         const restTotal = useMemo(()=> employees.length*daysLen - sumTotals.总, [employees.length, daysLen, sumTotals.总]);
         const peakMid = useMemo(()=> daySeries.reduce((best,s)=> s.M>best.val ? {d:s.d, val:s.M} : best, {d:'—', val:-1}), [daySeries]);
         const peakWhite = useMemo(()=> daySeries.reduce((best,s)=> s.W>best.val ? {d:s.d, val:s.W} : best, {d:'—', val:-1}), [daySeries]);
+
+        const restCycles = useMemo(()=>{
+          return employees.map(emp=>{
+            const months = {};
+            monthSpans.forEach(span=>{
+              const clipStart = cur.s > span.start ? cur.s : span.start;
+              const clipEnd = cur.e < span.end ? cur.e : span.end;
+              if(clipStart > clipEnd){ months[span.key] = ''; return; }
+              const dates = enumerateDates(clipStart, clipEnd);
+              let hasData = false;
+              const weekMap = {};
+              dates.forEach(day=>{
+                const row = data[day];
+                if(!row) return;
+                const v = row[emp];
+                if(v){ hasData = true; }
+                if(v === '休'){
+                  const wk = weekStartKey(day);
+                  if(!weekMap[wk]) weekMap[wk] = [];
+                  weekMap[wk].push(day);
+                }
+              });
+              if(!hasData){ months[span.key] = ''; return; }
+              const counts = {};
+              Object.values(weekMap).forEach(days=>{
+                if(days.length < 2) return;
+                const sortedDays = days.slice().sort();
+                const pair = sortedDays.slice(0,2).map(day=> dayToW(day)).join('');
+                if(pair){ counts[pair] = (counts[pair]||0) + 1; }
+              });
+              if(!Object.keys(counts).length){ months[span.key] = '—'; return; }
+              let bestPair = '';
+              let bestCount = -1;
+              Object.entries(counts).forEach(([pair,count])=>{
+                if(count > bestCount || (count === bestCount && pair < bestPair)){
+                  bestPair = pair;
+                  bestCount = count;
+                }
+              });
+              months[span.key] = bestPair ? `休${bestPair}` : '—';
+            });
+            return { emp, months };
+          });
+        }, [employees, data, monthSpans, cur.s, cur.e]);
 
         const rows = useMemo(()=>{
           const arr = employees.map(e=>{
@@ -727,116 +804,158 @@
         }, [employees, C, daysLen, adminDays, pMin, pMax, mixMax, orderBy, data, cur.s, cur.e]);
 
         return (
-          <Section title={`统计与对齐（${cur.s} ~ ${cur.e}）`} right={<div className="flex items-center gap-2 text-sm"><label>周期：</label><select className="border rounded px-2 py-1" value={statPeriod} onChange={e=>setStatPeriod(e.target.value)}><option value="y">年度</option><option value="q">季度</option><option value="m">月度</option><option value="r">当前选区</option></select><label className="ml-3">排序：</label><select className="border rounded px-2 py-1" value={orderBy} onChange={e=>setOrderBy(e.target.value)}><option value="default">默认</option><option value="diff">差值</option><option value="longest">最长连班</option><option value="ratioDev">中/白偏差</option><option value="mix">混合比例</option></select></div>}>
-            {/* 均值卡片 */}
-            <div className="mb-3 grid grid-cols-2 md:grid-cols-5 gap-2 text-sm">
-              <div className="rounded-xl border p-2 bg-gradient-to-br from-indigo-50 to-white"><div className="text-xs text-gray-500">平均白</div><div className="text-lg font-semibold text-indigo-700">{avg.白}</div></div>
-              <div className="rounded-xl border p-2 bg-gradient-to-br from-sky-50 to-white"><div className="text-xs text-gray-500">平均中1</div><div className="text-lg font-semibold text-sky-700">{avg.中1}</div></div>
-              <div className="rounded-xl border p-2 bg-gradient-to-br from-cyan-50 to-white"><div className="text-xs text-gray-500">平均中2</div><div className="text-lg font-semibold text-cyan-700">{avg.中2}</div></div>
-              <div className="rounded-xl border p-2 bg-gradient-to-br from-rose-50 to-white"><div className="text-xs text-gray-500">平均夜</div><div className="text-lg font-semibold text-rose-700">{avg.夜}</div></div>
-              <div className="rounded-xl border p-2 bg-gradient-to-br from-emerald-50 to-white"><div className="text-xs text-gray-500">平均总</div><div className="text-lg font-semibold text-emerald-700">{avg.总}</div></div>
+          <Section title={`统计与对齐（${cur.s} ~ ${cur.e}）`} right={<div className="flex flex-wrap items-center gap-2 text-sm"><label>周期：</label><select className="border rounded px-2 py-1" value={statPeriod} onChange={e=>setStatPeriod(e.target.value)}><option value="y">年度</option><option value="q">季度</option><option value="m">月度</option><option value="r">当前选区</option></select><label className="ml-2">视图：</label><select className="border rounded px-2 py-1" value={statView} onChange={e=>setStatView(e.target.value)}><option value="daily">日期在岗分析</option><option value="person">人员班次统计</option><option value="rest">月度休息周期</option></select>{statView==='person' && (<><label className="ml-2">排序：</label><select className="border rounded px-2 py-1" value={orderBy} onChange={e=>setOrderBy(e.target.value)}><option value="default">默认</option><option value="diff">差值</option><option value="longest">最长连班</option><option value="ratioDev">中/白偏差</option><option value="mix">混合比例</option></select></>)}</div>}>
+            {statView==='person' && (
+              <div className="mb-3 grid grid-cols-2 md:grid-cols-5 gap-2 text-sm">
+                <div className="rounded-xl border p-2 bg-gradient-to-br from-indigo-50 to-white"><div className="text-xs text-gray-500">平均白</div><div className="text-lg font-semibold text-indigo-700">{avg.白}</div></div>
+                <div className="rounded-xl border p-2 bg-gradient-to-br from-sky-50 to-white"><div className="text-xs text-gray-500">平均中1</div><div className="text-lg font-semibold text-sky-700">{avg.中1}</div></div>
+                <div className="rounded-xl border p-2 bg-gradient-to-br from-cyan-50 to-white"><div className="text-xs text-gray-500">平均中2</div><div className="text-lg font-semibold text-cyan-700">{avg.中2}</div></div>
+                <div className="rounded-xl border p-2 bg-gradient-to-br from-rose-50 to-white"><div className="text-xs text-gray-500">平均夜</div><div className="text-lg font-semibold text-rose-700">{avg.夜}</div></div>
+                <div className="rounded-xl border p-2 bg-gradient-to-br from-emerald-50 to-white"><div className="text-xs text-gray-500">平均总</div><div className="text-lg font-semibold text-emerald-700">{avg.总}</div></div>
+              </div>
+            )}
+
+            <div className="mb-4 grid grid-cols-2 md:grid-cols-3 gap-2 text-sm">
+              <div className="rounded-xl border p-2 bg-gradient-to-br from-amber-50 to-white"><div className="text-xs text-gray-500">平均每天在岗</div><div className="text-lg font-semibold text-amber-700">{dailyAvg.总}</div></div>
+              <div className="rounded-xl border p-2 bg-gradient-to-br from-indigo-50 to-white"><div className="text-xs text-gray-500">平均每天白班</div><div className="text-lg font-semibold text-indigo-700">{dailyAvg.白}</div></div>
+              <div className="rounded-xl border p-2 bg-gradient-to-br from-sky-50 to-white"><div className="text-xs text-gray-500">平均每天中1</div><div className="text-lg font-semibold text-sky-700">{dailyAvg.中1}</div></div>
             </div>
 
-            {/* 新增：总和分析卡片 */}
-            <div className="mb-4 grid grid-cols-2 md:grid-cols-6 gap-2 text-sm">
-              <div className="rounded-xl border p-2 bg-indigo-50/60"><div className="text-xs text-gray-500">白（总人次）</div><div className="text-lg font-semibold text-indigo-700">{sumTotals.白}</div></div>
-              <div className="rounded-xl border p-2 bg-sky-50/60"><div className="text-xs text-gray-500">中1（总人次）</div><div className="text-lg font-semibold text-sky-700">{sumTotals.中1}</div></div>
-              <div className="rounded-xl border p-2 bg-cyan-50/60"><div className="text-xs text-gray-500">中2（总人次）</div><div className="text-lg font-semibold text-cyan-700">{sumTotals.中2}</div></div>
-              <div className="rounded-xl border p-2 bg-rose-50/60"><div className="text-xs text-gray-500">夜（总人次）</div><div className="text-lg font-semibold text-rose-700">{sumTotals.夜}</div></div>
-              <div className="rounded-xl border p-2 bg-emerald-50/60"><div className="text-xs text-gray-500">在岗（总人次）</div><div className="text-lg font-semibold text-emerald-700">{sumTotals.总}</div></div>
-              <div className="rounded-xl border p-2 bg-gray-50"><div className="text-xs text-gray-500">休（估算）</div><div className="text-lg font-semibold text-gray-800">{restTotal}</div></div>
-            </div>
+            {statView==='daily' && (
+              <>
+                <div className="mb-4 grid grid-cols-2 md:grid-cols-6 gap-2 text-sm">
+                  <div className="rounded-xl border p-2 bg-indigo-50/60"><div className="text-xs text-gray-500">白（总人次）</div><div className="text-lg font-semibold text-indigo-700">{sumTotals.白}</div></div>
+                  <div className="rounded-xl border p-2 bg-sky-50/60"><div className="text-xs text-gray-500">中1（总人次）</div><div className="text-lg font-semibold text-sky-700">{sumTotals.中1}</div></div>
+                  <div className="rounded-xl border p-2 bg-cyan-50/60"><div className="text-xs text-gray-500">中2（总人次）</div><div className="text-lg font-semibold text-cyan-700">{sumTotals.中2}</div></div>
+                  <div className="rounded-xl border p-2 bg-rose-50/60"><div className="text-xs text-gray-500">夜（总人次）</div><div className="text-lg font-semibold text-rose-700">{sumTotals.夜}</div></div>
+                  <div className="rounded-xl border p-2 bg-emerald-50/60"><div className="text-xs text-gray-500">在岗（总人次）</div><div className="text-lg font-semibold text-emerald-700">{sumTotals.总}</div></div>
+                  <div className="rounded-xl border p-2 bg-gray-50"><div className="text-xs text-gray-500">休（估算）</div><div className="text-lg font-semibold text-gray-800">{restTotal}</div></div>
+                </div>
 
-            {/* 新增：每日分布（可滚动迷你热力/构成条）*/}
-            <div className="overflow-auto rounded-xl border">
-              <table className="text-sm min-w-[780px] w-full">
-                <thead className="bg-gray-50">
-                  <tr className="text-gray-500">
-                    <th className="text-left py-2 px-3">日期</th>
-                    <th className="text-right py-2 px-3">在岗</th>
-                    <th className="text-left py-2 px-3 w-[320px]">构成（白 / 中1 / 中2 / 夜）</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {daySeries.map(s=>{
-                    const pW = s.total? Math.round(s.W/s.total*100) : 0;
-                    const pM = s.total? Math.round(s.M/s.total*100) : 0;
-                    const pM2= s.total? Math.round(s.N2/s.total*100) : 0;
-                    const pN = s.total? Math.round(s.N/s.total*100) : 0;
-                    return (
-                      <tr key={s.d} className="border-t hover:bg-gray-50">
-                        <td className="py-1.5 px-3">{s.d}</td>
-                        <td className="py-1.5 px-3 text-right">{s.total}</td>
-                        <td className="py-1.5 px-3">
-                          <div className="h-3 rounded-full bg-gray-100 overflow-hidden flex">
-                            <div style={{width:`${pW}%`, background: shiftColors['白']}} title={`白 ${s.W}`}></div>
-                            <div style={{width:`${pM}%`, background: shiftColors['中1']}} title={`中1 ${s.M}`}></div>
-                            <div style={{width:`${pM2}%`, background: shiftColors['中2']}} title={`中2 ${s.N2}`}></div>
-                            <div style={{width:`${pN}%`, background: shiftColors['夜']}} title={`夜 ${s.N}`}></div>
-                          </div>
-                        </td>
+                <div className="overflow-auto rounded-xl border">
+                  <table className="text-sm min-w-[780px] w-full">
+                    <thead className="bg-gray-50">
+                      <tr className="text-gray-500">
+                        <th className="text-left py-2 px-3">日期</th>
+                        <th className="text-right py-2 px-3">在岗</th>
+                        <th className="text-left py-2 px-3 w-[320px]">构成（白 / 中1 / 中2 / 夜）</th>
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                    </thead>
+                    <tbody>
+                      {daySeries.map(s=>{
+                        const pW = s.total? Math.round(s.W/s.total*100) : 0;
+                        const pM = s.total? Math.round(s.M/s.total*100) : 0;
+                        const pM2= s.total? Math.round(s.N2/s.total*100) : 0;
+                        const pN = s.total? Math.round(s.N/s.total*100) : 0;
+                        return (
+                          <tr key={s.d} className="border-t hover:bg-gray-50">
+                            <td className="py-1.5 px-3">{s.d}</td>
+                            <td className="py-1.5 px-3 text-right">{s.total}</td>
+                            <td className="py-1.5 px-3">
+                              <div className="h-3 rounded-full bg-gray-100 overflow-hidden flex">
+                                <div style={{width:`${pW}%`, background: shiftColors['白']}} title={`白 ${s.W}`}></div>
+                                <div style={{width:`${pM}%`, background: shiftColors['中1']}} title={`中1 ${s.M}`}></div>
+                                <div style={{width:`${pM2}%`, background: shiftColors['中2']}} title={`中2 ${s.N2}`}></div>
+                                <div style={{width:`${pN}%`, background: shiftColors['夜']}} title={`夜 ${s.N}`}></div>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
 
-            {/* 极值提示 */}
-            <div className="mt-3 text-xs text-gray-600">高峰提示：中1最多 {peakMid.val<0?0:peakMid.val}（{peakMid.d}），白班最多 {peakWhite.val<0?0:peakWhite.val}（{peakWhite.d}）。</div>
+                <div className="mt-3 text-xs text-gray-600">高峰提示：中1最多 {peakMid.val<0?0:peakMid.val}（{peakMid.d}），白班最多 {peakWhite.val<0?0:peakWhite.val}（{peakWhite.d}）。</div>
+              </>
+            )}
 
-            {/* 调参与结果表 */}
-            <div className="flex items-center gap-2 mb-3 mt-4 text-sm">
-              <label className="inline-flex items-center gap-2">行政班应上天数（当前周期）：<input type="number" className="w-24 border rounded px-2 py-1" value={adminDays} onChange={e=> setAdminDays(Number(e.target.value||0))}/></label>
-              <span className="text-gray-500">差值= 实际总天数 - 行政班应上天数（正=超出，负=不足）</span>
-            </div>
-            <div className="overflow-auto">
-              <table className="text-sm min-w-[1100px] w-full">
-                <thead>
-                  <tr className="text-gray-500">
-                    <th className="text-left">姓名</th>
-                    {['白','中1','中2','夜','总','休','差值','中/白','中/白达标','最长连班','混合周期','混合达标','建议'].map((h,i)=> <th key={i} className={`text-right pr-3 ${i===0?'text-left':''}`}>{h}</th>)}
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map(r=> (
-                    <tr key={r.e} className="border-t hover:bg-gray-50">
-                      <td className="py-1 text-left">{r.e}</td>
-                      {[r.W, r.M, r.N2, r.N, r.total, r.restDays, r.diff, r.ratioStr].map((v,idx)=> <td key={idx} className={`py-1 text-right pr-3 ${idx===6&&(v<0?'text-red-600':v>0?'text-emerald-600':'text-gray-700')}`}>{v}</td>)}
-                      <td className="py-1 text-right pr-3">{r.pass? <span className="badge bg-emerald-100 text-emerald-700">达标</span> : <span className="badge bg-rose-100 text-rose-700">未达标</span>}</td>
-                      <td className={`py-1 text-right pr-3 ${r.longest>6?'text-rose-600 font-medium':''}`}>{r.longest}</td>
-                      <td className={`py-1 text-right pr-3`}>{r.cycMix}/{r.cycTot}（{(r.cycRatio*100).toFixed(0)}%）</td>
-                      <td className="py-1 text-right pr-3">{r.mixOk? <span className="badge bg-emerald-100 text-emerald-700">OK</span> : <span className="badge bg-rose-100 text-rose-700">超限</span>}</td>
-                      <td className="py-1 text-right pr-3 text-gray-700">{(()=>{ if(adminDays>0){ if(r.diff>0) return `建议减 ${r.diff}`; if(r.diff<0) return `建议补 ${-r.diff}`; } return '—'; })()}</td>
+            {statView==='person' && (
+              <>
+                <div className="flex items-center gap-2 mb-3 mt-4 text-sm">
+                  <label className="inline-flex items-center gap-2">行政班应上天数（当前周期）：<input type="number" className="w-24 border rounded px-2 py-1" value={adminDays} onChange={e=> setAdminDays(Number(e.target.value||0))}/></label>
+                  <span className="text-gray-500">差值= 实际总天数 - 行政班应上天数（正=超出，负=不足）</span>
+                </div>
+                <div className="overflow-auto">
+                  <table className="text-sm min-w-[1100px] w-full">
+                    <thead>
+                      <tr className="text-gray-500">
+                        <th className="text-left">姓名</th>
+                        {['白','中1','中2','夜','总','休','差值','中/白','中/白状态','最长连班','混合周期','混合状态','建议'].map((h,i)=> <th key={i} className={`text-right pr-3 ${i===0?'text-left':''}`}>{h}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map(r=> (
+                        <tr key={r.e} className="border-t hover:bg-gray-50">
+                          <td className="py-1 text-left">{r.e}</td>
+                          {[r.W, r.M, r.N2, r.N, r.total, r.restDays, r.diff, r.ratioStr].map((v,idx)=> <td key={idx} className={`py-1 text-right pr-3 ${idx===6&&(v<0?'text-red-600':v>0?'text-emerald-600':'text-gray-700')}`}>{v}</td>)}
+                          <td className="py-1 text-right pr-3">{r.pass? <span className="badge bg-emerald-100 text-emerald-700">OK</span> : <span className="badge bg-rose-100 text-rose-700">OFF</span>}</td>
+                          <td className={`py-1 text-right pr-3 ${r.longest>6?'text-rose-600 font-medium':''}`}>{r.longest}</td>
+                          <td className={`py-1 text-right pr-3`}>{r.cycMix}/{r.cycTot}（{(r.cycRatio*100).toFixed(0)}%）</td>
+                          <td className="py-1 text-right pr-3">{r.mixOk? <span className="badge bg-emerald-100 text-emerald-700">OK</span> : <span className="badge bg-rose-100 text-rose-700">超限</span>}</td>
+                          <td className="py-1 text-right pr-3 text-gray-700">{(()=>{ if(adminDays>0){ if(r.diff>0) return `建议减 ${r.diff}`; if(r.diff<0) return `建议补 ${-r.diff}`; } return '—'; })()}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+
+            {statView==='rest' && (
+              <div className="overflow-auto rounded-xl border">
+                <table className="min-w-[640px] w-full text-sm">
+                  <thead className="bg-gray-50 text-gray-600">
+                    <tr>
+                      <th className="text-left py-2 px-3 w-36">人员</th>
+                      {monthSpans.map(span=> (
+                        <th key={span.key} className="text-center py-2 px-3">{span.label}</th>
+                      ))}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {restCycles.map(row=> (
+                      <tr key={row.emp} className="border-t">
+                        <td className="py-2 px-3 font-medium text-gray-700">{row.emp}</td>
+                        {monthSpans.map(span=>{
+                          const val = row.months[span.key];
+                          return (
+                            <td key={span.key} className="py-2 px-3 text-center text-gray-800">{val || ''}</td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </Section>
         );
       })();
 
       const ViewHistory = (
-        <Section title="历史版本">
+        <Section title="历史版本" right={<button onClick={loadVersions} className={`px-3 py-1.5 rounded-full text-sm text-white transition ${editingLocked?'bg-gray-300 cursor-not-allowed':'bg-gray-800 hover:bg-gray-700'}`} disabled={editingLocked}>刷新列表</button>}>
           {versions.length===0 ? (
-            <p className="text-sm text-gray-500">暂无版本。点击顶部“保存新版本”生成，或点“从服务器加载”同步。</p>
+            <p className="text-sm text-gray-500">暂无版本。请在“设置 / 导出”页保存新版本，或从服务器加载以同步。</p>
           ) : (
             <div className="overflow-auto max-h-64">
               <table className="text-sm w-full">
                 <thead>
-                  <tr className="text-gray-500"><th className="text-left">版本ID</th><th className="text-left">时间</th><th className="text-left">备注</th><th className="text-left">操作者</th><th></th></tr>
+                  <tr className="text-gray-500"><th className="text-left">版本</th><th className="text-left">时间</th><th className="text-left">操作者</th><th></th></tr>
                 </thead>
                 <tbody>
-                  {versions.map(v=> (
+                  {versions.map(v=> { const name = v.note || v.name || ''; const remark = v.remark || v.description || ''; return (
                     <tr key={v.id} className="border-t hover:bg-gray-50">
-                      <td className="py-1">{v.id}</td>
+                      <td className="py-1">
+                        <div className="font-medium text-gray-900">{name || '（未命名）'}</div>
+                        <div className="text-xs text-gray-500">ID：{v.id}</div>
+                        {remark && <div className="text-xs text-gray-500 mt-0.5">备注：{remark}</div>}
+                      </td>
                       <td className="py-1">{v.created_at}</td>
-                      <td className="py-1">{v.note||''}</td>
                       <td className="py-1">{v.created_by_name||'管理员'}</td>
                       <td className="py-1"><button className="text-indigo-600 hover:underline" onClick={()=>loadVersionById(v.id)}>载入</button></td>
                     </tr>
-                  ))}
+                  ); })}
                 </tbody>
               </table>
             </div>
@@ -854,9 +973,10 @@
                 onCompositionEnd={(e)=>{ setNote(e.target.value); }}
                 onChange={e=>setNote(e.target.value)} placeholder="例如：10月第一版"/>
             </div>
-            <div className="flex items-end gap-2">
+            <div className="flex flex-wrap items-end gap-2">
+              <PillBtn onClick={loadFromServer} disabled={editingLocked} title={editingLocked?'执行中：只读':''}>从服务器加载</PillBtn>
+              <PillBtn onClick={saveToServer} color="emerald" disabled={editingLocked} title={editingLocked?'执行中：只读':''}>保存新版本</PillBtn>
               <PillBtn onClick={exportExcel} color="sky" disabled={editingLocked} title={editingLocked?'执行中：只读':''}>服务器导出 Excel/CSV</PillBtn>
-              <button onClick={loadVersions} className={`px-4 py-2 rounded-full text-white transition ${editingLocked? 'bg-gray-300 cursor-not-allowed':'bg-gray-800 hover:bg-gray-700'}`} disabled={editingLocked}>刷新版本列表</button>
             </div>
           </div>
           <div className="mt-6">
@@ -887,8 +1007,6 @@
               <input type="date" className={`border rounded px-3 py-1.5 ${editingLocked?'bg-gray-100':''}`} value={end} onChange={e=>setEnd(e.target.value)} disabled={editingLocked} />
             </div>
             <div className="flex items-center gap-2">
-              <PillBtn onClick={loadFromServer} disabled={editingLocked}>从服务器加载</PillBtn>
-              <PillBtn onClick={saveToServer} color="emerald" disabled={editingLocked}>保存新版本</PillBtn>
               <PillBtn onClick={exportExcel} color="sky" disabled={editingLocked}>导出</PillBtn>
               <button onClick={()=> clearRange('empty')} className={`px-3 py-1.5 rounded-full text-sm ${editingLocked?'bg-gray-200 cursor-not-allowed':'bg-amber-100 hover:bg-amber-200'}`} disabled={editingLocked}>清空当前范围</button>
               <button onClick={()=> clearRange('rest')} className={`px-3 py-1.5 rounded-full text-sm ${editingLocked?'bg-gray-200 cursor-not-allowed':'bg-rose-100 hover:bg-rose-200'}`} disabled={editingLocked}>清空并填“休”</button>
