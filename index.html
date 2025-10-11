@@ -138,6 +138,29 @@
       });
       return next;
     }
+    function normalizeNightRules(raw){
+      const defaults = {
+        prioritizeInterval: false,
+        restAfterNight: true,
+        enforceRestCap: true,
+        restAfterMid2: true,
+        allowDoubleMid2: false,
+        allowNightDay4: false
+      };
+      if(!raw || typeof raw !== 'object') return { ...defaults };
+      const next = { ...defaults };
+      if(typeof raw.prioritizeInterval === 'boolean') next.prioritizeInterval = raw.prioritizeInterval;
+      if(typeof raw.restAfterNight === 'boolean') next.restAfterNight = raw.restAfterNight;
+      if(typeof raw.enforceRestCap === 'boolean') next.enforceRestCap = raw.enforceRestCap;
+      if(typeof raw.restAfterMid2 === 'boolean') next.restAfterMid2 = raw.restAfterMid2;
+      if(typeof raw.allowDoubleMid2 === 'boolean') next.allowDoubleMid2 = raw.allowDoubleMid2;
+      if(typeof raw.allowNightDay4 === 'boolean') next.allowNightDay4 = raw.allowNightDay4;
+      if(raw.rest2AfterNight && typeof raw.rest2AfterNight === 'object'){
+        if(typeof raw.rest2AfterNight.enabled === 'boolean') next.restAfterNight = raw.rest2AfterNight.enabled;
+        if(typeof raw.rest2AfterNight.mandatory === 'boolean') next.enforceRestCap = raw.rest2AfterNight.mandatory;
+      }
+      return next;
+    }
     const pairToSet = (p)=>{
       const cleaned = sanitizeRestPairValue(p);
       if(cleaned.length !== 2) return new Set();
@@ -292,18 +315,137 @@
       return repairNoMidToWhite({ data: cur, employees, start, end });
     }
 
-    function autoAssignNightAndM2({employees, data, start, end, override=false, nightRules}){
-      const rules = nightRules || { rest2AfterNight:{enabled:true, mandatory:true}, minInterval:3 };
+    function autoAssignNightAndM2({employees, data, start, end, override=false, nightRules, restPrefs={}}){
+      const rules = normalizeNightRules(nightRules);
       const dates = enumerateDates(start,end);
-      const last = { 夜:{}, 中2:{} };
-      const total = { 夜:{}, 中2:{} };
-      for(const e of employees){ last['夜'][e]=null; last['中2'][e]=null; total['夜'][e]=0; total['中2'][e]=0; }
-      for(const d of dates){ const row=data[d]||{}; for(const e of employees){ const v=row[e]; if(v==='夜'){ last['夜'][e]=d; total['夜'][e]++; } if(v==='中2'){ last['中2'][e]=d; total['中2'][e]++; } } }
-      const newData = {...data};
-      function pick(kind, day){ const arr=employees.map(e=>{ const ls=last[kind][e]; const gap = ls? ((new Date(day)-new Date(ls))/86400000) : 999; const mean = employees.length? Object.values(total[kind]).reduce((a,b)=>a+b,0)/employees.length : 0; const deficit = mean - (total[kind][e]||0); const score = 0.6*gap + 0.4*deficit; return [e,score,gap]; }); arr.sort((a,b)=> b[1]-a[1]); for(const [e,_,gap] of arr){ const row=newData[day]||{}; const cur=row[e]||''; if(kind==='夜' && rules.minInterval>0 && gap < rules.minInterval) continue; if(!override && cur && cur!=='休' && cur!==kind) continue; if(cur==='夜' && kind==='中2') continue; if(kind==='中2'){ const y1=dateAdd(day,-1), y2=dateAdd(day,-2); if(getVal(newData,y1,e)==='夜' || getVal(newData,y2,e)==='夜') continue; } if(wouldExceed6(newData,e,day,kind)) continue; return e; } return null; }
-      for(const d of dates){ const row={...(newData[d]||{})}; if(!Object.values(row).includes('夜')){ const n=pick('夜',d); if(n){ row[n]='夜'; newData[d]=row; last['夜'][n]=d; total['夜'][n]++; for(let i=1;i<=2;i++){ const t=dateAdd(d,i); const r={...(newData[t]||{})}; r[n]='休'; newData[t]=r; } } }
-        const row2={...(newData[d]||{})}; if(!Object.values(row2).includes('中2')){ const m2=pick('中2',d); if(m2 && row2[m2]!=='夜'){ row2[m2] = (override? '中2' : (row2[m2]||'中2')); newData[d]=row2; last['中2'][m2]=d; total['中2'][m2]++; const next1=dateAdd(d,1); const r1={...(newData[next1]||{})}; if(r1[m2]==='白' || r1[m2]==='中1' || (r1[m2]||'')===''){ r1[m2]='休'; newData[next1]=r1; } } } }
-      for(const e of employees){ let run=0; for(const d of dates){ const v=getVal(newData,d,e); if(isWork(v)){ run++; if(run>6){ const r={...(newData[d]||{})}; if(r[e]!=='夜' && r[e]!=='中2'){ r[e]='休'; newData[d]=r; run=0; } } } else { run=0; } } }
+      const newData = { ...data };
+      const status = {};
+      for(const e of employees){ status[e] = { lastNight:null, lastMid2:null }; }
+      function gapFrom(lastDay, curDay){ if(!lastDay) return Number.POSITIVE_INFINITY; return (new Date(curDay) - new Date(lastDay)) / 86400000; }
+      function shouldRestFromHistory(emp, idx, kind){
+        if(idx===undefined || idx===null) return false;
+        const nightRestEnforced = rules.restAfterNight || rules.allowNightDay4;
+        if(!nightRestEnforced && !rules.restAfterMid2) return false;
+        for(let back=1; back<=2; back++){
+          const prevIdx = idx-back;
+          if(prevIdx < 0) continue;
+          const prevDay = dates[prevIdx];
+          const prevVal = getVal(newData, prevDay, emp);
+          if(nightRestEnforced && prevVal==='夜') return true;
+          if(rules.restAfterMid2 && prevVal==='中2'){
+            if(kind==='中2' && rules.allowDoubleMid2 && back===1) continue;
+            return true;
+          }
+        }
+        if(kind==='中2' && rules.allowDoubleMid2 && rules.restAfterMid2){
+          const prevDay = dates[idx-1];
+          const prevPrevDay = dates[idx-2];
+          if(prevDay && getVal(newData, prevDay, emp)==='中2' && prevPrevDay && getVal(newData, prevPrevDay, emp)==='中2') return true;
+        }
+        return false;
+      }
+      function ensureRest(emp, originIdx, daysCount, force=false){ for(let offset=1; offset<=daysCount; offset++){ const targetIdx = originIdx + offset; if(targetIdx >= dates.length) break; const day = dates[targetIdx]; const row = { ...(newData[day]||{}) }; const cur = row[emp] || ''; if(force || override || cur==='' || cur==='休'){ row[emp] = '休'; newData[day] = row; } } }
+      function capRest(emp, originIdx){ if(!rules.enforceRestCap) return; const targetIdx = originIdx + 3; if(targetIdx >= dates.length) return; const day = dates[targetIdx]; const row = { ...(newData[day]||{}) }; if(row[emp] === '休'){ const prevIdx = targetIdx - 1; const prevDay = prevIdx >=0 ? dates[prevIdx] : null; const prevVal = prevDay ? getVal(newData, prevDay, emp) : ''; row[emp] = prevVal === '白' ? '中1' : '白'; newData[day] = row; } }
+      function enforceNightDay4(emp, originIdx){ if(!rules.allowNightDay4) return; if(originIdx % 7 !== 3) return; ensureRest(emp, originIdx, 2, true); const day7Idx = originIdx + 3; if(day7Idx < dates.length){ const day7 = dates[day7Idx]; const row = { ...(newData[day7]||{}) }; if(row[emp] === '休' || !row[emp]){ row[emp] = '白'; newData[day7] = row; } }
+      }
+      for(let i=0; i<dates.length; i++){
+        const day = dates[i];
+        const baseRow = { ...(newData[day]||{}) };
+        if(!Object.values(baseRow).includes('夜')){
+          let candidates = employees.slice();
+          if(rules.prioritizeInterval){
+            candidates.sort((a,b)=> gapFrom(status[b].lastNight, day) - gapFrom(status[a].lastNight, day));
+          } else {
+            candidates.reverse();
+          }
+          const pickNight = candidates.find(emp=>{
+            const cur = baseRow[emp] || '';
+            if(cur==='休' || cur==='中2') return false;
+            if(!override && cur && cur!=='夜') return false;
+            if(shouldRestFromHistory(emp, i, '夜')) return false;
+            if(restPrefs && isRestDayForEmp(restPrefs, emp, day)) return false;
+            return true;
+          });
+          if(pickNight){
+            baseRow[pickNight] = '夜';
+            newData[day] = baseRow;
+            status[pickNight].lastNight = day;
+          }
+        } else {
+          newData[day] = baseRow;
+        }
+        const rowAfterNight = { ...(newData[day]||{}) };
+        if(!Object.values(rowAfterNight).includes('中2')){
+          let midCandidates = employees.slice().reverse();
+          const pickMid = midCandidates.find(emp=>{
+            const cur = rowAfterNight[emp] || '';
+            if(cur==='休' || cur==='夜') return false;
+            if(!override && cur && cur!=='中2') return false;
+            if(shouldRestFromHistory(emp, i, '中2')) return false;
+            if(!rules.allowDoubleMid2){
+              const prevDay = dates[i-1];
+              if(prevDay && getVal(newData, prevDay, emp)==='中2') return false;
+            }
+            if(restPrefs && isRestDayForEmp(restPrefs, emp, day)) return false;
+            return true;
+          });
+          if(pickMid){
+            rowAfterNight[pickMid] = '中2';
+            newData[day] = rowAfterNight;
+            status[pickMid].lastMid2 = day;
+          } else {
+            newData[day] = rowAfterNight;
+          }
+        } else {
+          newData[day] = rowAfterNight;
+        }
+        for(const emp of employees){
+          const val = getVal(newData, day, emp);
+          const st = status[emp];
+          if(val==='夜') st.lastNight = day;
+          if(val==='中2') st.lastMid2 = day;
+        }
+      }
+      if(rules.restAfterNight || rules.restAfterMid2){
+        for(const emp of employees){
+          for(let i=0; i<dates.length; i++){
+            const day = dates[i];
+            const val = getVal(newData, day, emp);
+            if(val==='夜'){
+              if(rules.restAfterNight){
+                ensureRest(emp, i, 2, true);
+                capRest(emp, i);
+              }
+              enforceNightDay4(emp, i);
+            }
+            if(val==='中2' && rules.restAfterMid2){
+              const nextDay = dates[i+1];
+              if(rules.allowDoubleMid2 && nextDay && getVal(newData, nextDay, emp)==='中2') continue;
+              ensureRest(emp, i, 2, true);
+              capRest(emp, i);
+            }
+          }
+        }
+      }
+      for(const e of employees){
+        let run = 0;
+        for(const day of dates){
+          const v = getVal(newData, day, e);
+          if(isWork(v)){
+            run++;
+            if(run>6){
+              const row = { ...(newData[day]||{}) };
+              if(row[e]!=='夜' && row[e]!=='中2'){
+                row[e] = '休';
+                newData[day] = row;
+                run = 0;
+              }
+            }
+          } else {
+            run = 0;
+          }
+        }
+      }
       return newData;
     }
 
@@ -336,7 +478,7 @@
 
     function LoginModal({onSuccess}){
       const [username, setUsername] = useState('admin');
-      const [password, setPassword] = useState('');
+      const [password, setPassword] = useState('admin');
       const [err, setErr] = useState('');
       async function doLogin(e){ e.preventDefault(); setErr(''); try{ const res = await apiPost('/login', { username, password }); onSuccess(res.user); } catch(ex){ setErr(ex.message||'登录失败'); } }
       return (
@@ -368,7 +510,7 @@
 
     function App(){
       const [user, setUser] = useState(null);
-      useEffect(()=>{ (async()=>{ try{ const m = await apiGet('/me'); setUser(m.user||null); } catch{} })(); },[]);
+      useEffect(()=>{ (async()=>{ try{ await apiPost('/logout',{}); } catch{} finally { setUser(null); } })(); },[]);
 
       const [team, setTeam] = useState('default');
       const [note, setNote] = useState('');
@@ -433,7 +575,7 @@
       const [adminDays, setAdminDays] = useState(0);
       const [nightWindows, setNightWindows] = useState([{ s:start, e:end }]);
       const [nightOverride, setNightOverride] = useState(true);
-      const [nightRules, setNightRules] = useState({ rest2AfterNight:{enabled:true, mandatory:true}, minInterval:3 });
+      const [nightRules, setNightRules] = useState(()=> normalizeNightRules());
 
       const [rMin, setRMin] = useState(0.3);
       const [rMax, setRMax] = useState(0.7);
@@ -443,16 +585,16 @@
 
       const DRAFT_KEY = 'scheduler_main_v2_draft';
       useEffect(()=>{
-        try{ const d = JSON.parse(localStorage.getItem(DRAFT_KEY)||'null'); if(d){ setTeam(d.team||'default'); setStart(d.start||start); setEnd(d.end||end); setEmployees(d.employees||[]); setData(d.data||{}); setVersionId(d.versionId||null); setShiftColors(d.shiftColors||shiftColors); setAdminDays(Number(d.adminDays||0)); setRestPrefs(sanitizeRestPrefsMap(d.restPrefs||{})); setNightWindows(d.nightWindows||[{s:start,e:end}]); setNightOverride(!!d.nightOverride); setNightRules(d.nightRules||nightRules); setRMin(typeof d.rMin==='number'?d.rMin:0.3); setRMax(typeof d.rMax==='number'?d.rMax:0.7); setPMin(typeof d.pMin==='number'?d.pMin:0.3); setPMax(typeof d.pMax==='number'?d.pMax:0.7); setMixMax(typeof d.mixMax==='number'?d.mixMax:1); } else { tryRestoreRestForView(); } }catch{}
+        try{ const d = JSON.parse(localStorage.getItem(DRAFT_KEY)||'null'); if(d){ setTeam(d.team||'default'); setStart(d.start||start); setEnd(d.end||end); setEmployees(d.employees||[]); setData(d.data||{}); setVersionId(d.versionId||null); setShiftColors(d.shiftColors||shiftColors); setAdminDays(Number(d.adminDays||0)); setRestPrefs(sanitizeRestPrefsMap(d.restPrefs||{})); setNightWindows(d.nightWindows||[{s:start,e:end}]); setNightOverride(!!d.nightOverride); setNightRules(normalizeNightRules(d.nightRules)); setRMin(typeof d.rMin==='number'?d.rMin:0.3); setRMax(typeof d.rMax==='number'?d.rMax:0.7); setPMin(typeof d.pMin==='number'?d.pMin:0.3); setPMax(typeof d.pMax==='number'?d.pMax:0.7); setMixMax(typeof d.mixMax==='number'?d.mixMax:1); } else { tryRestoreRestForView(); } }catch{}
       },[]);
       useEffect(()=>{
         try{ const snap={team,start,end,employees,data,versionId,shiftColors,adminDays,restPrefs,nightWindows,nightOverride,nightRules,rMin,rMax,pMin,pMax,mixMax}; localStorage.setItem(DRAFT_KEY, JSON.stringify(snap)); }catch{}
       }, [team,start,end,employees,data,versionId,shiftColors,adminDays,restPrefs,nightWindows,nightOverride,nightRules,rMin,rMax,pMin,pMax,mixMax]);
 
-      async function loadFromServer(){ try { const res = await apiGet(`/schedule?team=${encodeURIComponent(team)}&start=${start}&end=${end}`); setEmployees(res.employees||[]); setData(res.data||{}); setVersionId(res.version_id||null); if(res.rest_prefs){ setRestPrefs(sanitizeRestPrefsMap(res.rest_prefs)); } if(typeof res.mixMax==='number'){ setMixMax(res.mixMax); } tryRestoreRestForView(); } catch(e){ globalErr(e.message); } }
-      async function saveToServer(){ try{ const operator = (user && (user.display_name || user.username)) || '管理员'; const body = { team, viewStart:start, viewEnd:end, employees, data, baseVersionId: versionId, note, operator, adminDays, restPrefs, nightRules, rMin,rMax,pMin,pMax, mixMax }; const res = await apiPost('/schedule/save', body); setVersionId(res.version_id||null);} catch(e){ if(e.payload && e.payload.code===409){ if(confirm('服务器已有新版本，是否加载最新并覆盖？')) await loadFromServer(); return; } globalErr(e.message); } }
-      async function loadVersions(){ try{ const res = await apiGet(`/schedule/versions?team=${encodeURIComponent(team)}&start=${start}&end=${end}`); setVersions(res.versions||[]); } catch(e){ globalErr(e.message); } }
-      async function loadVersionById(id){ try{ const res = await apiGet(`/version?id=${id}`); setEmployees(res.employees||[]); setData(res.data||{}); setVersionId(id); if(res.rest_prefs){ setRestPrefs(sanitizeRestPrefsMap(res.rest_prefs)); } if(typeof res.mixMax==='number'){ setMixMax(res.mixMax); } tryRestoreRestForView(); } catch(e){ globalErr(e.message); } }
+      async function loadFromServer(){ try { const res = await apiGet(`/schedule?team=${encodeURIComponent(team)}&start=${start}&end=${end}`); setEmployees(res.employees||[]); setData(res.data||{}); setVersionId(res.version_id||null); if(res.rest_prefs){ setRestPrefs(sanitizeRestPrefsMap(res.rest_prefs)); } if(res.night_rules || res.nightRules){ setNightRules(normalizeNightRules(res.night_rules||res.nightRules)); } if(typeof res.mixMax==='number'){ setMixMax(res.mixMax); } tryRestoreRestForView(); } catch(e){ globalErr(e.message); } }
+      async function saveToServer(){ try{ const operator = (user && (user.display_name || user.username)) || '管理员'; const safeNightRules = normalizeNightRules(nightRules); const body = { team, viewStart:start, viewEnd:end, employees, data, baseVersionId: versionId, note, operator, adminDays, restPrefs, nightRules: safeNightRules, rMin,rMax,pMin,pMax, mixMax }; const res = await apiPost('/schedule/save', body); setVersionId(res.version_id||null);} catch(e){ if(e.payload && e.payload.code===409){ if(confirm('服务器已有新版本，是否加载最新并覆盖？')) await loadFromServer(); return; } globalErr(e.message); } }
+      async function loadVersions(){ try{ const res = await apiGet(`/schedule/versions?team=${encodeURIComponent(team)}`); setVersions(res.versions||[]); } catch(e){ globalErr(e.message); } }
+      async function loadVersionById(id){ try{ const res = await apiGet(`/version?id=${id}`); setEmployees(res.employees||[]); setData(res.data||{}); setVersionId(id); if(res.rest_prefs){ setRestPrefs(sanitizeRestPrefsMap(res.rest_prefs)); } if(res.night_rules || res.nightRules){ setNightRules(normalizeNightRules(res.night_rules||res.nightRules)); } if(typeof res.mixMax==='number'){ setMixMax(res.mixMax); } tryRestoreRestForView(); } catch(e){ globalErr(e.message); } }
       async function doLogout(){ try{ await apiPost('/logout',{}); setUser(null);}catch{} }
       function exportExcel(){ const url = `${API_BASE}/export/xlsx?team=${encodeURIComponent(team)}&start=${start}&end=${end}`; window.location.href=url; }
 
@@ -718,18 +860,21 @@
               <button className="px-3 py-1.5 border rounded" onClick={()=> setNightWindows(a=> [...a, {s:start,e:end}])}>新增一段</button>
             </div>
 
-            <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+            <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
               <label className="inline-flex items-center gap-2"><input type="checkbox" checked={nightOverride} onChange={e=> setNightOverride(e.target.checked)} /> 应用夜/中2时允许覆盖现有班次</label>
-              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={nightRules.rest2AfterNight.enabled} onChange={e=> setNightRules(r=>({...r, rest2AfterNight:{...r.rest2AfterNight, enabled:e.target.checked}}))}/> 夜后休 2 天</label>
-              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={nightRules.rest2AfterNight.mandatory} onChange={e=> setNightRules(r=>({...r, rest2AfterNight:{...r.rest2AfterNight, mandatory:e.target.checked}}))}/> 强制改休</label>
-              <label className="inline-flex items-center gap-2">最小夜班间隔（天）<input type="number" className="w-20 border rounded px-2 py-1" value={nightRules.minInterval} onChange={e=> setNightRules(r=>({...r, minInterval: Math.max(0, parseInt(e.target.value||'0'))}))}/></label>
+              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={nightRules.prioritizeInterval} onChange={e=> setNightRules(r=>({...r, prioritizeInterval:e.target.checked}))}/> 夜班按间隔优先分配</label>
+              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={nightRules.restAfterNight} onChange={e=> setNightRules(r=>({...r, restAfterNight:e.target.checked}))}/> 夜班后休息 2 天</label>
+              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={nightRules.enforceRestCap} onChange={e=> setNightRules(r=>({...r, enforceRestCap:e.target.checked}))}/> 夜后休息不超过 2 天</label>
+              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={nightRules.restAfterMid2} onChange={e=> setNightRules(r=>({...r, restAfterMid2:e.target.checked}))}/> 中2 后休息 2 天</label>
+              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={nightRules.allowDoubleMid2} onChange={e=> setNightRules(r=>({...r, allowDoubleMid2:e.target.checked}))}/> 允许连续 2 个中2</label>
+              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={nightRules.allowNightDay4} onChange={e=> setNightRules(r=>({...r, allowNightDay4:e.target.checked}))}/> 支持周期第 4 天排夜班</label>
             </div>
 
             <div className="flex flex-wrap items-center gap-3 mt-3 text-sm">
               <PillBtn color="emerald" onClick={()=>{
                 if(checkedList.length===0){ alert('请先勾选人员'); return; }
                 let newD={...data};
-                for(const w of nightWindows){ if(!w.s||!w.e) continue; newD = autoAssignNightAndM2({ employees: checkedList, data:newD, start:w.s, end:w.e, override: nightOverride, nightRules }); }
+                for(const w of nightWindows){ if(!w.s||!w.e) continue; newD = autoAssignNightAndM2({ employees: checkedList, data:newD, start:w.s, end:w.e, override: nightOverride, nightRules, restPrefs }); }
                 setData(newD);
               }}>AI 一键分配 夜/中2（按窗口，多段）</PillBtn>
               <span className="text-xs text-gray-500">规则：夜后两天必须休；夜后两天禁止该员工中2；中2后一天强制休。</span>
