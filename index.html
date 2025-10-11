@@ -122,7 +122,33 @@
     function wouldExceed6(data, e, d, newV){ if(!isWork(newV)) return false; const L=countRunLeft(data,d,e); const R=countRunRight(data,d,e); return (L+1+R)>6; }
 
     const REST_PAIRS = ['12','23','34','56','71'];
-    const pairToSet = (p)=>{ const m={"1":1,"2":2,"3":3,"4":4,"5":5,"6":6,"7":7}; return new Set([m[p?.[0]], m[p?.[1]]]); };
+    const normalizeRestPair = (pair)=> pair==='17' ? '71' : pair;
+    function sanitizeRestPairValue(val){
+      if(!val) return '';
+      const digits = String(val).replace(/\D/g,'');
+      if(digits.length !== 2) return '';
+      const normalized = normalizeRestPair(digits);
+      return REST_PAIRS.includes(normalized) ? normalized : digits;
+    }
+    function sanitizeRestPrefsMap(map){
+      const next = {};
+      Object.entries(map||{}).forEach(([emp, raw])=>{
+        const cleaned = sanitizeRestPairValue(raw);
+        if(cleaned) next[emp] = cleaned;
+      });
+      return next;
+    }
+    const pairToSet = (p)=>{
+      const cleaned = sanitizeRestPairValue(p);
+      if(cleaned.length !== 2) return new Set();
+      const m={"1":1,"2":2,"3":3,"4":4,"5":5,"6":6,"7":7};
+      const set = new Set();
+      const first = m[cleaned[0]];
+      const second = m[cleaned[1]];
+      if(typeof first === 'number') set.add(first);
+      if(typeof second === 'number') set.add(second);
+      return set;
+    };
     const dayToW = (day)=> ((new Date(day).getDay()+6)%7)+1; // 周一=1 ... 周日=7
     function isRestDayForEmp(restPrefs, emp, day){ const p = restPrefs?.[emp]; if(!p) return false; const set = pairToSet(p); const w = dayToW(day); return set.has(w); }
 
@@ -378,6 +404,20 @@
       const [albumMaxDiff, setAlbumMaxDiff] = useState(0.5);
       const [albumAssignments, setAlbumAssignments] = useState({});
       const [albumAutoNote, setAlbumAutoNote] = useState('');
+      const ALBUM_HISTORY_KEY = 'scheduler_album_history_v1';
+      const [albumHistory, setAlbumHistory] = useState(()=>{
+        try{
+          const raw = JSON.parse(localStorage.getItem(ALBUM_HISTORY_KEY)||'[]');
+          if(Array.isArray(raw)){
+            return raw.map(item=> ({
+              ...item,
+              assignments: item.assignments || {}
+            }));
+          }
+        }catch{}
+        return [];
+      });
+      useEffect(()=>{ try{ localStorage.setItem(ALBUM_HISTORY_KEY, JSON.stringify(albumHistory)); }catch{} }, [albumHistory]);
 
       const REST_STORE_KEY = 'scheduler_restprefs_store_v2';
       function restStoreKey(team,start,end){ return `${team}__${start}__${end}`; }
@@ -385,7 +425,7 @@
       function saveRestStore(map){ try{ localStorage.setItem(REST_STORE_KEY, JSON.stringify(map||{})); }catch{} }
       const [restPrefs, setRestPrefs] = useState({});
       function saveRestForView(){ const map = loadRestStore(); map[restStoreKey(team,start,end)] = restPrefs; saveRestStore(map); }
-      function tryRestoreRestForView(){ const map = loadRestStore(); const hit = map[restStoreKey(team,start,end)]; if(hit && Object.keys(hit).length){ setRestPrefs(hit); } }
+      function tryRestoreRestForView(){ const map = loadRestStore(); const hit = map[restStoreKey(team,start,end)]; if(hit && Object.keys(hit).length){ setRestPrefs(sanitizeRestPrefsMap(hit)); } }
       useEffect(()=>{ if(Object.keys(restPrefs||{}).length) saveRestForView(); }, [restPrefs, team, start, end]);
       useEffect(()=>{ tryRestoreRestForView(); }, [team, start, end]);
 
@@ -403,16 +443,16 @@
 
       const DRAFT_KEY = 'scheduler_main_v2_draft';
       useEffect(()=>{
-        try{ const d = JSON.parse(localStorage.getItem(DRAFT_KEY)||'null'); if(d){ setTeam(d.team||'default'); setStart(d.start||start); setEnd(d.end||end); setEmployees(d.employees||[]); setData(d.data||{}); setVersionId(d.versionId||null); setShiftColors(d.shiftColors||shiftColors); setAdminDays(Number(d.adminDays||0)); setRestPrefs(d.restPrefs||{}); setNightWindows(d.nightWindows||[{s:start,e:end}]); setNightOverride(!!d.nightOverride); setNightRules(d.nightRules||nightRules); setRMin(typeof d.rMin==='number'?d.rMin:0.3); setRMax(typeof d.rMax==='number'?d.rMax:0.7); setPMin(typeof d.pMin==='number'?d.pMin:0.3); setPMax(typeof d.pMax==='number'?d.pMax:0.7); setMixMax(typeof d.mixMax==='number'?d.mixMax:1); } else { tryRestoreRestForView(); } }catch{}
+        try{ const d = JSON.parse(localStorage.getItem(DRAFT_KEY)||'null'); if(d){ setTeam(d.team||'default'); setStart(d.start||start); setEnd(d.end||end); setEmployees(d.employees||[]); setData(d.data||{}); setVersionId(d.versionId||null); setShiftColors(d.shiftColors||shiftColors); setAdminDays(Number(d.adminDays||0)); setRestPrefs(sanitizeRestPrefsMap(d.restPrefs||{})); setNightWindows(d.nightWindows||[{s:start,e:end}]); setNightOverride(!!d.nightOverride); setNightRules(d.nightRules||nightRules); setRMin(typeof d.rMin==='number'?d.rMin:0.3); setRMax(typeof d.rMax==='number'?d.rMax:0.7); setPMin(typeof d.pMin==='number'?d.pMin:0.3); setPMax(typeof d.pMax==='number'?d.pMax:0.7); setMixMax(typeof d.mixMax==='number'?d.mixMax:1); } else { tryRestoreRestForView(); } }catch{}
       },[]);
       useEffect(()=>{
         try{ const snap={team,start,end,employees,data,versionId,shiftColors,adminDays,restPrefs,nightWindows,nightOverride,nightRules,rMin,rMax,pMin,pMax,mixMax}; localStorage.setItem(DRAFT_KEY, JSON.stringify(snap)); }catch{}
       }, [team,start,end,employees,data,versionId,shiftColors,adminDays,restPrefs,nightWindows,nightOverride,nightRules,rMin,rMax,pMin,pMax,mixMax]);
 
-      async function loadFromServer(){ try { const res = await apiGet(`/schedule?team=${encodeURIComponent(team)}&start=${start}&end=${end}`); setEmployees(res.employees||[]); setData(res.data||{}); setVersionId(res.version_id||null); if(res.rest_prefs){ setRestPrefs(res.rest_prefs); } if(typeof res.mixMax==='number'){ setMixMax(res.mixMax); } tryRestoreRestForView(); } catch(e){ globalErr(e.message); } }
+      async function loadFromServer(){ try { const res = await apiGet(`/schedule?team=${encodeURIComponent(team)}&start=${start}&end=${end}`); setEmployees(res.employees||[]); setData(res.data||{}); setVersionId(res.version_id||null); if(res.rest_prefs){ setRestPrefs(sanitizeRestPrefsMap(res.rest_prefs)); } if(typeof res.mixMax==='number'){ setMixMax(res.mixMax); } tryRestoreRestForView(); } catch(e){ globalErr(e.message); } }
       async function saveToServer(){ try{ const operator = (user && (user.display_name || user.username)) || '管理员'; const body = { team, viewStart:start, viewEnd:end, employees, data, baseVersionId: versionId, note, operator, adminDays, restPrefs, nightRules, rMin,rMax,pMin,pMax, mixMax }; const res = await apiPost('/schedule/save', body); setVersionId(res.version_id||null);} catch(e){ if(e.payload && e.payload.code===409){ if(confirm('服务器已有新版本，是否加载最新并覆盖？')) await loadFromServer(); return; } globalErr(e.message); } }
       async function loadVersions(){ try{ const res = await apiGet(`/schedule/versions?team=${encodeURIComponent(team)}&start=${start}&end=${end}`); setVersions(res.versions||[]); } catch(e){ globalErr(e.message); } }
-      async function loadVersionById(id){ try{ const res = await apiGet(`/version?id=${id}`); setEmployees(res.employees||[]); setData(res.data||{}); setVersionId(id); if(res.rest_prefs){ setRestPrefs(res.rest_prefs); } if(typeof res.mixMax==='number'){ setMixMax(res.mixMax); } tryRestoreRestForView(); } catch(e){ globalErr(e.message); } }
+      async function loadVersionById(id){ try{ const res = await apiGet(`/version?id=${id}`); setEmployees(res.employees||[]); setData(res.data||{}); setVersionId(id); if(res.rest_prefs){ setRestPrefs(sanitizeRestPrefsMap(res.rest_prefs)); } if(typeof res.mixMax==='number'){ setMixMax(res.mixMax); } tryRestoreRestForView(); } catch(e){ globalErr(e.message); } }
       async function doLogout(){ try{ await apiPost('/logout',{}); setUser(null);}catch{} }
       function exportExcel(){ const url = `${API_BASE}/export/xlsx?team=${encodeURIComponent(team)}&start=${start}&end=${end}`; window.location.href=url; }
 
@@ -829,6 +869,61 @@
         return { totalDays, whiteAssigned, midAssigned };
       }, [albumDates, albumAssignments]);
 
+      const exportAlbumPlan = ()=>{
+        if(albumDates.length===0){
+          alert('暂无可导出的专辑审核排班数据');
+          return;
+        }
+        const escape = (val)=> String(val||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+        const headerHtml = '<tr><th>日期</th><th>星期</th><th>白班审核人</th><th>中班审核人</th></tr>';
+        const bodyHtml = albumDates.map(day=>{
+          const info = albumAssignments[day] || { white:'', mid:'' };
+          const weekLabel = '周' + WN[new Date(day).getDay()];
+          return `<tr><td>${escape(day)}</td><td>${escape(weekLabel)}</td><td>${escape(info.white||'')}</td><td>${escape(info.mid||'')}</td></tr>`;
+        }).join('');
+        const tableHtml = `<table>${headerHtml}${bodyHtml}</table>`;
+        const blob = new Blob(['\ufeff' + tableHtml], { type: 'application/vnd.ms-excel' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        const rangeLabel = albumRange ? `_${albumRange.start}_${albumRange.end}` : '';
+        link.href = url;
+        link.download = `专辑审核排班表${rangeLabel}.xls`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(()=> URL.revokeObjectURL(url), 200);
+      };
+
+      const confirmAlbumPlan = ()=>{
+        if(editingLocked){ alert('执行中：请稍后再试'); return; }
+        if(!albumRange || albumDates.length===0){ alert('请先设置有效的月份范围并生成排班'); return; }
+        const snapshot = {};
+        albumDates.forEach(day=>{
+          const info = albumAssignments[day] || { white:'', mid:'' };
+          snapshot[day] = { white: info.white || '', mid: info.mid || '' };
+        });
+        const hasAny = Object.values(snapshot).some(info=> info.white || info.mid);
+        if(!hasAny && !confirm('当前排班表全部未分配，仍然确认并保存吗？')) return;
+        const existingIdx = albumHistory.findIndex(item=> item?.range?.start===albumRange.start && item?.range?.end===albumRange.end);
+        if(existingIdx>=0 && !confirm('该时间范围已存在确认排班，继续将覆盖历史记录，是否继续？')) return;
+        const entry = {
+          id: `album-${Date.now()}`,
+          savedAt: new Date().toISOString(),
+          range: { start: albumRange.start, end: albumRange.end },
+          assignments: snapshot,
+          whiteHour: albumWhiteHourValue,
+          midHour: albumMidHourValue,
+          totals: { ...albumTotals },
+          diff: albumDiff,
+          coverage: { ...albumCoverage }
+        };
+        setAlbumHistory(prev=>{
+          const next = existingIdx>=0 ? prev.filter((_,idx)=> idx!==existingIdx) : prev.slice();
+          return [entry, ...next];
+        });
+        setAlbumAutoNote('排班已确认并保存，可在统计视图查看历史与分析。');
+      };
+
       const autoAssignAlbum = ()=>{
         if(editingLocked){ alert('执行中：请稍后再试'); return; }
         if(albumCheckedList.length===0){ alert('请先在左侧勾选参与专辑审核的人员'); return; }
@@ -913,9 +1008,15 @@
 
             <div className="space-y-4 xl:col-span-3">
               <div className="rounded-2xl border bg-white/90 p-4">
-                <div className="flex items-center justify-between text-sm font-medium text-gray-700">
-                  <span>排班概览</span>
-                  <span className="text-xs text-gray-400">{albumRange? `${albumRange.start} ~ ${albumRange.end}` : '请选择排班月份范围'}</span>
+                <div className="flex flex-wrap items-center justify-between gap-2 text-sm font-medium text-gray-700">
+                  <div className="flex items-center gap-2">
+                    <span>排班概览</span>
+                    <span className="text-xs text-gray-400">{albumRange? `${albumRange.start} ~ ${albumRange.end}` : '请选择排班月份范围'}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <PillBtn color="emerald" onClick={confirmAlbumPlan} disabled={editingLocked || !albumRange || albumDates.length===0} title={editingLocked? '执行中：只读': (!albumRange || albumDates.length===0 ? '请先设置有效的月份范围' : '确认排班并写入历史')}>确认排班</PillBtn>
+                    <PillBtn color="gray" onClick={exportAlbumPlan} disabled={albumDates.length===0} title={albumDates.length===0 ? '暂无可导出的排班数据' : '导出为 Excel'}>导出 Excel</PillBtn>
+                  </div>
                 </div>
                 {albumRange ? (
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-3 text-sm">
@@ -938,6 +1039,78 @@
                   </div>
                 ) : (
                   <div className="text-xs text-gray-500 mt-3">尚未设置有效范围，请在左侧选择月份。</div>
+                )}
+              </div>
+
+              <div className="rounded-2xl border bg-white overflow-hidden">
+                <div className="px-4 py-3 border-b bg-gray-50 text-sm font-medium text-gray-700 flex items-center justify-between">
+                  <span>播单专辑审核排班表</span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-gray-400">支持手动微调，实时更新统计</span>
+                    <button onClick={exportAlbumPlan} disabled={albumDates.length===0}
+                      className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${albumDates.length===0 ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-indigo-600 text-white hover:bg-indigo-500'}`}>
+                      导出 Excel
+                    </button>
+                  </div>
+                </div>
+                {albumDates.length===0 ? (
+                  <div className="p-4 text-xs text-gray-500">请选择有效月份后再生成排班。</div>
+                ) : (
+                  <div className="overflow-auto">
+                    <table className="min-w-[520px] w-full text-sm">
+                      <thead className="bg-gray-50 text-gray-500">
+                        <tr>
+                          <th className="text-left py-2 px-3">日期</th>
+                          <th className="text-left py-2 px-3">星期</th>
+                          <th className="text-left py-2 px-3">白班审核人</th>
+                          <th className="text-left py-2 px-3">中班审核人</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {albumDates.map(day=>{
+                          const info = albumAssignments[day] || { white:'', mid:'' };
+                          const row = data[day] || {};
+                          const weekLabel = WN[new Date(day).getDay()];
+                          const whiteCandidates = albumCheckedList.filter(emp=> (row[emp]||'')==='白');
+                          const midCandidates = albumCheckedList.filter(emp=> (row[emp]||'')==='中1');
+                          const whiteClass = `border rounded px-2 py-1 w-full text-sm transition-colors ${info.white ? 'bg-white border-gray-200 text-gray-700' : 'bg-rose-50 border-rose-200 text-rose-600'}`;
+                          const midClass = `border rounded px-2 py-1 w-full text-sm transition-colors ${info.mid ? 'bg-white border-gray-200 text-gray-700' : 'bg-rose-50 border-rose-200 text-rose-600'}`;
+                          return (
+                            <tr key={`album-${day}`} className="border-t hover:bg-indigo-50/20">
+                              <td className="py-1.5 px-3 font-medium text-gray-700">{day}</td>
+                              <td className="py-1.5 px-3 text-gray-500">周{weekLabel}</td>
+                              <td className="py-1.5 px-3">
+                                <select
+                                  className={whiteClass}
+                                  value={info.white || ''}
+                                  onChange={e=> updateAlbumAssignment(day, 'white', e.target.value)}
+                                  title={whiteCandidates.length===0 ? '当日无白班可选' : '请选择白班审核人'}
+                                >
+                                  <option value="">未分配</option>
+                                  {whiteCandidates.map(emp=> (
+                                    <option key={`${day}-${emp}-white`} value={emp}>{emp}</option>
+                                  ))}
+                                </select>
+                              </td>
+                              <td className="py-1.5 px-3">
+                                <select
+                                  className={midClass}
+                                  value={info.mid || ''}
+                                  onChange={e=> updateAlbumAssignment(day, 'mid', e.target.value)}
+                                  title={midCandidates.length===0 ? '当日无中1可选' : '请选择中班审核人'}
+                                >
+                                  <option value="">未分配</option>
+                                  {midCandidates.map(emp=> (
+                                    <option key={`${day}-${emp}-mid`} value={emp}>{emp}</option>
+                                  ))}
+                                </select>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
               </div>
 
@@ -974,62 +1147,6 @@
                                   </td>
                                 );
                               })}
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-
-              <div className="rounded-2xl border bg-white overflow-hidden">
-                <div className="px-4 py-3 border-b bg-gray-50 text-sm font-medium text-gray-700 flex items-center justify-between">
-                  <span>播单专辑审核排班表</span>
-                  <span className="text-xs text-gray-400">支持手动微调，实时更新统计</span>
-                </div>
-                {albumDates.length===0 ? (
-                  <div className="p-4 text-xs text-gray-500">请选择有效月份后再生成排班。</div>
-                ) : (
-                  <div className="overflow-auto">
-                    <table className="min-w-[520px] w-full text-sm">
-                      <thead className="bg-gray-50 text-gray-500">
-                        <tr>
-                          <th className="text-left py-2 px-3">日期</th>
-                          <th className="text-left py-2 px-3">星期</th>
-                          <th className="text-left py-2 px-3">白班审核人</th>
-                          <th className="text-left py-2 px-3">中班审核人</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {albumDates.map(day=>{
-                          const info = albumAssignments[day] || { white:'', mid:'' };
-                          const row = data[day] || {};
-                          const weekLabel = WN[new Date(day).getDay()];
-                          return (
-                            <tr key={`album-${day}`} className="border-t hover:bg-indigo-50/20">
-                              <td className="py-1.5 px-3 font-medium text-gray-700">{day}</td>
-                              <td className="py-1.5 px-3 text-gray-500">周{weekLabel}</td>
-                              <td className="py-1.5 px-3">
-                                <select className="border rounded px-2 py-1 w-full bg-white" value={info.white || ''} onChange={e=> updateAlbumAssignment(day, 'white', e.target.value)}>
-                                  <option value="">未分配</option>
-                                  {albumCheckedList.map(emp=>{
-                                    const shift = row[emp] || '';
-                                    const label = shift==='白'? emp : `${emp}${shift? `（${shift}）`:'（无班）'}`;
-                                    return <option key={`${day}-${emp}-white`} value={emp}>{label}</option>;
-                                  })}
-                                </select>
-                              </td>
-                              <td className="py-1.5 px-3">
-                                <select className="border rounded px-2 py-1 w-full bg-white" value={info.mid || ''} onChange={e=> updateAlbumAssignment(day, 'mid', e.target.value)}>
-                                  <option value="">未分配</option>
-                                  {albumCheckedList.map(emp=>{
-                                    const shift = row[emp] || '';
-                                    const label = shift==='中1'? emp : `${emp}${shift? `（${shift}）`:'（无班）'}`;
-                                    return <option key={`${day}-${emp}-mid`} value={emp}>{label}</option>;
-                                  })}
-                                </select>
-                              </td>
                             </tr>
                           );
                         })}
@@ -1148,7 +1265,7 @@
                         <div className="flex items-center gap-2">
                           {REST_PAIRS.map(p=> (
                             <label key={p} className={`px-2 py-1 rounded border cursor-pointer ${restPrefs[e]===p? 'bg-indigo-50 border-indigo-300 text-indigo-700':'hover:bg-gray-50'} ${editingLocked?'opacity-60 cursor-not-allowed':''}`}>
-                              <input type="radio" name={`rest-${e}`} disabled={editingLocked} className="mr-1" checked={restPrefs[e]===p} onChange={()=> setRestPrefs(r=> ({...r, [e]: p}))} /> 休{p}
+                              <input type="radio" name={`rest-${e}`} disabled={editingLocked} className="mr-1" checked={restPrefs[e]===p} onChange={()=> setRestPrefs(r=> ({...r, [e]: sanitizeRestPairValue(p)}))} /> 休{p}
                             </label>
                           ))}
                           <button className={`px-2 py-1 rounded border ${editingLocked?'opacity-60 cursor-not-allowed':''}`} disabled={editingLocked} onClick={()=> setRestPrefs(r=>{ const x={...r}; delete x[e]; return x; })}>清除偏好</button>
@@ -1182,6 +1299,7 @@
         const [statView, setStatView] = useState('person');
         const [showRestCounts, setShowRestCounts] = useState(true);
         const [orderBy, setOrderBy] = useState('default');
+        const [albumStatMode, setAlbumStatMode] = useState('analysis');
         const cur = statPeriod==='y'? ranges.y : statPeriod==='q'? ranges.q : statPeriod==='m'? ranges.m : ranges.r;
         const daysLen = useMemo(()=> enumerateDates(cur.s, cur.e).length, [cur.s, cur.e]);
         const C = useMemo(()=> countByEmpInRange(employees, data, cur.s, cur.e), [employees,data,statPeriod,start,end]);
@@ -1238,7 +1356,8 @@
               Object.values(weekMap).forEach(days=>{
                 if(days.length < 2) return;
                 const sortedDays = days.slice().sort();
-                const pair = sortedDays.slice(0,2).map(day=> dayToW(day)).join('');
+                const rawPair = sortedDays.slice(0,2).map(day=> dayToW(day)).join('');
+                const pair = normalizeRestPair(rawPair);
                 if(pair){ counts[pair] = (counts[pair]||0) + 1; }
               });
               if(!Object.keys(counts).length){
@@ -1293,6 +1412,73 @@
           });
         }, [restCycles, monthSpans]);
 
+        const albumEntriesInRange = useMemo(()=> albumHistory.filter(entry=>{
+          if(!entry || !entry.range) return false;
+          const rs = entry.range.start;
+          const re = entry.range.end;
+          if(!rs || !re) return false;
+          return !(re < cur.s || rs > cur.e);
+        }), [albumHistory, cur.s, cur.e]);
+        const albumAnalysis = useMemo(()=>{
+          const perEmp = {};
+          const employeeSet = new Set();
+          const summary = { batches: albumEntriesInRange.length, whiteDays:0, midDays:0, whiteHours:0, midHours:0, totalHours:0 };
+          albumEntriesInRange.forEach(entry=>{
+            const assignments = entry.assignments || {};
+            const whiteHour = Number(entry.whiteHour)||0;
+            const midHour = Number(entry.midHour)||0;
+            Object.entries(assignments).forEach(([day, info])=>{
+              if(day < cur.s || day > cur.e) return;
+              const whiteName = info?.white || '';
+              const midName = info?.mid || '';
+              if(whiteName){
+                if(!perEmp[whiteName]) perEmp[whiteName] = { whiteDays:0, whiteHours:0, midDays:0, midHours:0 };
+                perEmp[whiteName].whiteDays += 1;
+                perEmp[whiteName].whiteHours += whiteHour;
+                summary.whiteDays += 1;
+                summary.whiteHours += whiteHour;
+                summary.totalHours += whiteHour;
+                employeeSet.add(whiteName);
+              }
+              if(midName){
+                if(!perEmp[midName]) perEmp[midName] = { whiteDays:0, whiteHours:0, midDays:0, midHours:0 };
+                perEmp[midName].midDays += 1;
+                perEmp[midName].midHours += midHour;
+                summary.midDays += 1;
+                summary.midHours += midHour;
+                summary.totalHours += midHour;
+                employeeSet.add(midName);
+              }
+            });
+          });
+          const rows = Object.entries(perEmp).map(([emp,val])=> ({
+            emp,
+            whiteDays: val.whiteDays,
+            whiteHours: val.whiteHours,
+            midDays: val.midDays,
+            midHours: val.midHours,
+            totalHours: (val.whiteHours || 0) + (val.midHours || 0)
+          })).sort((a,b)=> b.totalHours - a.totalHours || a.emp.localeCompare(b.emp,'zh-CN'));
+          const batches = summary.batches || 0;
+          const employeeCount = employeeSet.size;
+          return {
+            rows,
+            summary: {
+              ...summary,
+              employeeCount,
+              avgTotalHoursPerBatch: batches? summary.totalHours / batches : 0,
+              avgWhiteHoursPerBatch: batches? summary.whiteHours / batches : 0,
+              avgMidHoursPerBatch: batches? summary.midHours / batches : 0,
+              avgHoursPerEmployee: employeeCount? summary.totalHours / employeeCount : 0
+            }
+          };
+        }, [albumEntriesInRange, cur.s, cur.e]);
+        const albumHistoryForView = useMemo(()=> albumEntriesInRange.slice().sort((a,b)=>{
+          return new Date(b?.savedAt || 0) - new Date(a?.savedAt || 0);
+        }), [albumEntriesInRange]);
+        const albumSummary = albumAnalysis.summary || { batches:0, whiteDays:0, midDays:0, whiteHours:0, midHours:0, totalHours:0, employeeCount:0, avgTotalHoursPerBatch:0, avgWhiteHoursPerBatch:0, avgMidHoursPerBatch:0, avgHoursPerEmployee:0 };
+        const albumRows = albumAnalysis.rows || [];
+
         const rows = useMemo(()=>{
           const arr = employees.map(e=>{
             const total=C[e]?.总||0; const W=C[e]?.白||0; const M=C[e]?.中1||0; const N2=C[e]?.中2||0; const N=C[e]?.夜||0;
@@ -1317,7 +1503,7 @@
         }, [employees, C, daysLen, adminDays, pMin, pMax, mixMax, orderBy, data, cur.s, cur.e]);
 
         return (
-          <Section title={`统计与对齐（${cur.s} ~ ${cur.e}）`} right={<div className="flex flex-wrap items-center gap-2 text-sm"><label>周期：</label><select className="border rounded px-2 py-1" value={statPeriod} onChange={e=>setStatPeriod(e.target.value)}><option value="y">年度</option><option value="q">季度</option><option value="m">月度</option><option value="r">当前选区</option></select><label className="ml-2">视图：</label><select className="border rounded px-2 py-1" value={statView} onChange={e=>setStatView(e.target.value)}><option value="daily">日期在岗分析</option><option value="person">人员班次统计</option><option value="rest">月度休息周期</option></select>{statView==='person' && (<><label className="ml-2">排序：</label><select className="border rounded px-2 py-1" value={orderBy} onChange={e=>setOrderBy(e.target.value)}><option value="default">默认</option><option value="diff">差值</option><option value="longest">最长连班</option><option value="ratioDev">中/白偏差</option><option value="mix">混合比例</option></select></>)}{statView==='rest' && (<label className="ml-2 inline-flex items-center gap-1 text-xs text-gray-600"><input type="checkbox" className="rounded" checked={showRestCounts} onChange={e=> setShowRestCounts(e.target.checked)} />显示月度明细</label>)}</div>}>
+          <Section title={`统计与对齐（${cur.s} ~ ${cur.e}）`} right={<div className="flex flex-wrap items-center gap-2 text-sm"><label>周期：</label><select className="border rounded px-2 py-1" value={statPeriod} onChange={e=>setStatPeriod(e.target.value)}><option value="y">年度</option><option value="q">季度</option><option value="m">月度</option><option value="r">当前选区</option></select><label className="ml-2">视图：</label><select className="border rounded px-2 py-1" value={statView} onChange={e=>setStatView(e.target.value)}><option value="daily">日期在岗分析</option><option value="person">人员班次统计</option><option value="rest">月度休息周期</option><option value="album">专辑审核</option></select>{statView==='person' && (<><label className="ml-2">排序：</label><select className="border rounded px-2 py-1" value={orderBy} onChange={e=>setOrderBy(e.target.value)}><option value="default">默认</option><option value="diff">差值</option><option value="longest">最长连班</option><option value="ratioDev">中/白偏差</option><option value="mix">混合比例</option></select></>)}{statView==='rest' && (<label className="ml-2 inline-flex items-center gap-1 text-xs text-gray-600"><input type="checkbox" className="rounded" checked={showRestCounts} onChange={e=> setShowRestCounts(e.target.checked)} />显示月度明细</label>)}</div>}>
             {statView==='person' && (
               <div className="mb-3 grid grid-cols-2 md:grid-cols-5 gap-2 text-sm">
                 <div className="rounded-xl border p-2 bg-gradient-to-br from-indigo-50 to-white"><div className="text-xs text-gray-500">平均白</div><div className="text-lg font-semibold text-indigo-700">{avg.白}</div></div>
@@ -1328,7 +1514,7 @@
               </div>
             )}
 
-            {statView!=='rest' && (
+            {['daily','person'].includes(statView) && (
               <div className="mb-4 grid grid-cols-2 md:grid-cols-3 gap-2 text-sm">
                 <div className="rounded-xl border p-2 bg-gradient-to-br from-amber-50 to-white"><div className="text-xs text-gray-500">平均每天在岗</div><div className="text-lg font-semibold text-amber-700">{dailyAvg.总}</div></div>
                 <div className="rounded-xl border p-2 bg-gradient-to-br from-indigo-50 to-white"><div className="text-xs text-gray-500">平均每天白班</div><div className="text-lg font-semibold text-indigo-700">{dailyAvg.白}</div></div>
@@ -1499,6 +1685,140 @@
                       </table>
                     </div>
                   </div>
+                )}
+              </>
+            )}
+
+            {statView==='album' && (
+              <>
+                <div className="mb-4 flex flex-wrap items-center gap-3 text-sm">
+                  <span className="font-medium text-gray-700">专辑审核视图</span>
+                  <div className="inline-flex rounded-full border border-indigo-100 bg-indigo-50/40 p-0.5">
+                    <button onClick={()=>setAlbumStatMode('analysis')} className={`px-3 py-1 rounded-full text-xs font-medium transition ${albumStatMode==='analysis' ? 'bg-indigo-600 text-white shadow' : 'text-indigo-600 hover:bg-indigo-100'}`}>数据统计分析</button>
+                    <button onClick={()=>setAlbumStatMode('history')} className={`px-3 py-1 rounded-full text-xs font-medium transition ${albumStatMode==='history' ? 'bg-indigo-600 text-white shadow' : 'text-indigo-600 hover:bg-indigo-100'}`}>历史排班表</button>
+                  </div>
+                  <span className="text-xs text-gray-400">基于专辑审核确认记录实时汇总</span>
+                </div>
+                {albumStatMode==='analysis' ? (
+                  albumEntriesInRange.length===0 ? (
+                    <div className="text-sm text-gray-500">当前统计周期内暂无已确认的专辑审核排班，可在专辑审核自动排班页点击“确认排班”后查看。</div>
+                  ) : (
+                    <>
+                      <div className="mb-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 text-sm">
+                        <div className="rounded-2xl border bg-gradient-to-br from-white to-indigo-50 p-3">
+                          <div className="text-xs text-gray-500">确认批次</div>
+                          <div className="text-lg font-semibold text-indigo-700">{albumSummary.batches}</div>
+                        </div>
+                        <div className="rounded-2xl border bg-gradient-to-br from-white to-emerald-50 p-3">
+                          <div className="text-xs text-gray-500">参与人员数</div>
+                          <div className="text-lg font-semibold text-emerald-700">{albumSummary.employeeCount}</div>
+                        </div>
+                        <div className="rounded-2xl border bg-gradient-to-br from-white to-sky-50 p-3">
+                          <div className="text-xs text-gray-500">累计白班天数</div>
+                          <div className="text-lg font-semibold text-sky-600">{albumSummary.whiteDays}</div>
+                        </div>
+                        <div className="rounded-2xl border bg-gradient-to-br from-white to-amber-50 p-3">
+                          <div className="text-xs text-gray-500">累计中班天数</div>
+                          <div className="text-lg font-semibold text-amber-600">{albumSummary.midDays}</div>
+                        </div>
+                        <div className="rounded-2xl border bg-gradient-to-br from-white to-rose-50 p-3">
+                          <div className="text-xs text-gray-500">单批平均总时长</div>
+                          <div className="text-lg font-semibold text-rose-600">{albumSummary.avgTotalHoursPerBatch.toFixed(2)}<span className="text-sm text-gray-500 ml-1">小时</span></div>
+                        </div>
+                        <div className="rounded-2xl border bg-gradient-to-br from-white to-slate-50 p-3">
+                          <div className="text-xs text-gray-500">人均审核时长</div>
+                          <div className="text-lg font-semibold text-slate-700">{albumSummary.avgHoursPerEmployee.toFixed(2)}<span className="text-sm text-gray-500 ml-1">小时</span></div>
+                        </div>
+                      </div>
+                      <div className="mb-3 text-xs text-gray-500">平均每批白班 {albumSummary.avgWhiteHoursPerBatch.toFixed(2)} 小时，中班 {albumSummary.avgMidHoursPerBatch.toFixed(2)} 小时。</div>
+                      <div className="overflow-auto rounded-2xl border">
+                        <table className="min-w-[680px] w-full text-sm">
+                          <thead className="bg-gray-50 text-gray-500">
+                            <tr>
+                              <th className="text-left py-2 px-3">人员</th>
+                              <th className="text-right py-2 px-3">白班天数</th>
+                              <th className="text-right py-2 px-3">白班时长</th>
+                              <th className="text-right py-2 px-3">中班天数</th>
+                              <th className="text-right py-2 px-3">中班时长</th>
+                              <th className="text-right py-2 px-3">总时长</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {albumRows.map(row=> (
+                              <tr key={`album-analysis-${row.emp}`} className="border-t hover:bg-indigo-50/20">
+                                <td className="py-1.5 px-3 text-gray-700">{row.emp}</td>
+                                <td className="py-1.5 px-3 text-right">{row.whiteDays}</td>
+                                <td className="py-1.5 px-3 text-right">{row.whiteHours.toFixed(2)}</td>
+                                <td className="py-1.5 px-3 text-right">{row.midDays}</td>
+                                <td className="py-1.5 px-3 text-right">{row.midHours.toFixed(2)}</td>
+                                <td className="py-1.5 px-3 text-right font-medium text-indigo-700">{row.totalHours.toFixed(2)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  )
+                ) : (
+                  albumHistoryForView.length===0 ? (
+                    <div className="text-sm text-gray-500">当前统计周期内暂无历史排班，可在专辑审核自动排班页确认后查看。</div>
+                  ) : (
+                    <div className="space-y-4">
+                      {albumHistoryForView.map(entry=> {
+                        const days = Object.keys(entry.assignments||{}).filter(day=> day>=cur.s && day<=cur.e).sort();
+                        const savedAt = entry.savedAt ? new Date(entry.savedAt).toLocaleString() : '—';
+                        const totals = entry.totals || {};
+                        const coverage = entry.coverage || {};
+                        return (
+                          <div key={entry.id} className="rounded-2xl border bg-white overflow-hidden shadow-sm">
+                            <div className="px-4 py-3 border-b bg-gray-50 text-sm font-medium text-gray-700 flex flex-wrap items-center justify-between gap-2">
+                              <div className="flex flex-col sm:flex-row sm:items-center sm:gap-3">
+                                <span>{entry.range?.start} ~ {entry.range?.end}</span>
+                                <span className="text-xs text-gray-400">保存于 {savedAt}</span>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2 text-xs text-gray-600">
+                                <span className="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700">白班 {totals.whiteDays||0} 天 / {(Number(totals.whiteHours)||0).toFixed(2)} 小时</span>
+                                <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">中班 {totals.midDays||0} 天 / {(Number(totals.midHours)||0).toFixed(2)} 小时</span>
+                                <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">总时长 {(Number(totals.totalHours)||0).toFixed(2)} 小时</span>
+                                <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">时长差值 {(Number(entry.diff)||0).toFixed(2)} 小时</span>
+                                <span className="px-2 py-0.5 rounded-full bg-sky-50 text-sky-700">覆盖 {coverage.totalDays||0} 天</span>
+                              </div>
+                            </div>
+                            {days.length===0 ? (
+                              <div className="p-4 text-xs text-gray-500">当前统计周期内与该记录无重叠日期。</div>
+                            ) : (
+                              <div className="overflow-auto">
+                                <table className="min-w-[600px] w-full text-sm">
+                                  <thead className="bg-gray-50 text-gray-500">
+                                    <tr>
+                                      <th className="text-left py-2 px-3">日期</th>
+                                      <th className="text-left py-2 px-3">星期</th>
+                                      <th className="text-left py-2 px-3">白班审核</th>
+                                      <th className="text-left py-2 px-3">中班审核</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {days.map(day=>{
+                                      const info = entry.assignments?.[day] || {};
+                                      const wk = WN[new Date(day).getDay()];
+                                      return (
+                                        <tr key={`${entry.id}-${day}`} className="border-t hover:bg-indigo-50/20">
+                                          <td className="py-1.5 px-3 font-medium text-gray-700">{day}</td>
+                                          <td className="py-1.5 px-3 text-gray-500">周{wk}</td>
+                                          <td className="py-1.5 px-3"><span className={`inline-block px-2 py-0.5 rounded-full text-xs ${info.white ? 'bg-white border border-gray-200 text-gray-700' : 'bg-rose-50 border border-rose-200 text-rose-600'}`}>{info.white || '未分配'}</span></td>
+                                          <td className="py-1.5 px-3"><span className={`inline-block px-2 py-0.5 rounded-full text-xs ${info.mid ? 'bg-white border border-gray-200 text-gray-700' : 'bg-rose-50 border border-rose-200 text-rose-600'}`}>{info.mid || '未分配'}</span></td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )
                 )}
               </>
             )}
