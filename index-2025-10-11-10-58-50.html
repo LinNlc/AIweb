@@ -1,0 +1,972 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>排班助手（测试版）</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root { --brand: 88 80 236; }
+    @keyframes fadeSlideIn { from { opacity: 0; transform: translateY(8px) scale(.98);} to { opacity: 1; transform: translateY(0) scale(1);} }
+    .animate-fade-in { animation: fadeSlideIn .35s ease both; }
+    .grid-wrap { height: calc(100vh - 260px); overflow: auto; }
+    th.sticky { position: sticky; top: 0; background: rgb(249 250 251/0.95); z-index: 3; backdrop-filter: blur(4px); }
+    td, th { white-space: nowrap; }
+    input.cell { width: 6rem; padding-right: 1.5rem; }
+    .cell-wrap { position: relative; }
+    .cell-toggle { position: absolute; right: .25rem; top: .45rem; font-size: 12px; line-height: 1; color: #9ca3af; }
+    .cell-toggle:hover { color: #4b5563; }
+    #errbar { display:none; }
+    #errbar.show { display:block; }
+    .left-sticky { position: sticky; left: 0; z-index: 2; background: white; }
+    .left-sticky-2 { position: sticky; left: 8.5rem; z-index: 2; background: white; }
+    .left-sticky-3 { position: sticky; left: 14.8rem; z-index: 2; background: white; }
+    .badge { display:inline-flex; align-items:center; justify-content:center; min-width:2.25rem; height:1.75rem; border-radius:9999px; padding:0 .5rem; font-size:.75rem; }
+    .floating-progress { position: fixed; right: 16px; bottom: 16px; z-index: 50; width: 340px; }
+    .fp-card { background: linear-gradient(135deg, rgba(88,80,236,.12), rgba(14,165,233,.12)); border: 1px solid rgba(88,80,236,.18); box-shadow: 0 10px 30px rgba(0,0,0,.08); }
+    .logbox { max-height: 140px; overflow:auto; background: rgba(255,255,255,.7); border-radius: .75rem; border: 1px solid rgba(88,80,236,.18); }
+    .picker { box-shadow: 0 10px 30px rgba(0,0,0,.12); }
+  </style>
+</head>
+<body class="bg-gray-50">
+  <div id="errbar" class="bg-red-50 text-red-700 text-sm px-4 py-2"></div>
+  <div id="root"></div>
+
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin="anonymous"></script>
+
+  <script type="text/babel" data-presets="env,react">
+    const { useState, useMemo, useEffect, useRef } = React;
+
+    function globalErr(msg){ const bar = document.getElementById('errbar'); if(bar){ bar.textContent = '错误：' + msg; bar.className = 'show bg-red-50 text-red-700 text-sm px-4 py-2'; } }
+    window.addEventListener('error', (e)=> globalErr(e?.message || '脚本错误'));
+    window.addEventListener('unhandledrejection', (e)=> globalErr(e?.reason?.message || String(e?.reason || 'Promise 错误')));
+
+    const Icon = ({name, className=''}) => { const common = "w-5 h-5"; switch(name){ case 'grid': return <svg className={common+" "+className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 9h8V3H3v6zm10 12h8v-6h-8v6zM3 21h8v-6H3v6zm10-12h8V3h-8v6z" strokeWidth="1.5"/></svg>; case 'users': return <svg className={common+" "+className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M16 11c1.66 0 3-1.57 3-3.5S17.66 4 16 4s-3 1.57-3 3.5S14.34 11 16 11zM8 11c1.66 0 3-1.57 3-3.5S9.66 4 8 4 5 5.57 5 7.5 6.34 11 8 11zM8 13c-2.67 0-8 1.34-8 4v3h10v-3c0-1.1.9-2 2-2h4c.74 0 1.4.4 1.74 1" strokeWidth="1.5"/></svg>; case 'magic': return <svg className={common+" "+className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 21l9-9M14 7l3-3M11 10l3-3" strokeWidth="1.5"/></svg>; case 'chart': return <svg className={common+" "+className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 3v18h18M7 13v5M12 9v9M17 6v12" strokeWidth="1.5"/></svg>; case 'history': return <svg className={common+" "+className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 8v5l3 3M3 12a9 9 0 1 0 9-9 9 9 0 0 0-9 9zm0 0h3" strokeWidth="1.5"/></svg>; case 'cog': return <svg className={common+" "+className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 15.5A3.5 3.5 0 1 0 12 8.5a3.5 3.5 0 0 0 0 7z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V22a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1 1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a2 2 0 0 1-1.82.33 1.65 1.65 0 0 0-1.51 1H2a2 2 0 0 1 0-4h.09c-.49.2-.95.52-1.15 1z" strokeWidth="1"/></svg>; case 'lock': return <svg className={common+" "+className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>; default: return null; } };
+
+    const colorClasses = { indigo: 'bg-indigo-600 hover:bg-indigo-500', emerald: 'bg-emerald-600 hover:bg-emerald-500', sky: 'bg-sky-600 hover:bg-sky-500', gray: 'bg-gray-800 hover:bg-gray-700' };
+    const PillBtn = ({children, onClick, color='indigo', type='button', disabled=false, title=''}) => (
+      <button type={type} disabled={disabled} onClick={onClick} title={title} className={`group relative overflow-hidden inline-flex items-center justify-center gap-2 rounded-full px-4 py-2 text-white ${disabled?'bg-gray-300 cursor-not-allowed':(colorClasses[color] || colorClasses.indigo)} transition-transform duration-200 ${disabled?'':'hover:-translate-y-0.5 active:translate-y-0'} shadow-md`}>
+        <span className="relative z-10">{children}</span>
+        {!disabled && <span className="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity"></span>}
+      </button>
+    );
+    const Section = ({title, children, right}) => (
+      <div className="bg-white rounded-2xl shadow p-4 mb-4 animate-fade-in">
+        <div className="flex items-center justify-between mb-3"><h2 className="text-lg font-semibold">{title}</h2>{right}</div>
+        {children}
+      </div>
+    );
+
+    const API_BASE = '/api';
+    const WN = ['日','一','二','三','四','五','六'];
+    const today = new Date();
+    const SHIFT_TYPES = ['白','中1','中2','夜','休'];
+    const SHIFT_WORK_TYPES = ['白','中1','中2','夜'];
+
+    function fmt(d) { return new Date(d.getTime() - d.getTimezoneOffset()*60000).toISOString().slice(0,10); }
+    function monthRangeOf(dateObj){ const y = dateObj.getFullYear(); const m = dateObj.getMonth(); const start = new Date(y, m, 1); const end = new Date(y, m + 1, 0); return [fmt(start), fmt(end)]; }
+    function enumerateDates(start, end){ const out=[]; let d=new Date(start); const e=new Date(end); while(d<=e){ out.push(fmt(d)); d.setDate(d.getDate()+1); } return out; }
+    function dow(ymd){ return new Date(ymd).getDay(); }
+    function dateAdd(ymd, delta){ const d=new Date(ymd); d.setDate(d.getDate()+delta); return fmt(d); }
+
+    async function apiGet(path){ const r = await fetch(API_BASE + path, { credentials: 'include' }); if(!r.ok){ let msg='请求失败'; try { const e=await r.json(); msg=e.message||msg; } catch{} throw new Error(msg); } return r.json(); }
+    async function apiPost(path, body){ const r = await fetch(API_BASE + path, { method: 'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify(body||{}), credentials: 'include' }); if(!r.ok){ let ejson=null; try { ejson = await r.json(); } catch{} const err = new Error((ejson&&ejson.message)||'请求失败'); if(ejson) err.payload = ejson; throw err; } return r.json(); }
+
+    const isWork = (v)=> !!(v && v!=='休');
+    function getVal(data, day, emp){ return (data[day]||{})[emp]||''; }
+    function setVal(map, day, emp, val){ const row = { ...(map[day]||{}) }; row[emp] = val; map[day] = row; }
+
+    function countByEmpInRange(employees, data, start, end){
+      const dates = enumerateDates(start,end);
+      const counter = {}; for(const e of employees){ counter[e] = { 总:0 }; for(const s of SHIFT_WORK_TYPES){ counter[e][s]=0; } }
+      for(const d of dates){ const row = data[d]||{}; for(const e of employees){ const v = row[e]||''; if(!v || v==='休') continue; counter[e]['总']++; if(SHIFT_WORK_TYPES.includes(v)) counter[e][v]++; } }
+      return counter;
+    }
+
+    function countRunLeft(data, d, e){ let c=0; for(let i=-1;i>=-10;i--){ const ymd=dateAdd(d,i); const v=getVal(data, ymd, e); if(isWork(v)) c++; else break; } return c; }
+    function countRunRight(data, d, e){ let c=0; for(let i=1;i<=10;i++){ const ymd=dateAdd(d,i); const v=getVal(data, ymd, e); if(isWork(v)) c++; else break; } return c; }
+    function wouldExceed6(data, e, d, newV){ if(!isWork(newV)) return false; const L=countRunLeft(data,d,e); const R=countRunRight(data,d,e); return (L+1+R)>6; }
+
+    const REST_PAIRS = ['12','23','34','56','71'];
+    const pairToSet = (p)=>{ const m={"1":1,"2":2,"3":3,"4":4,"5":5,"6":6,"7":7}; return new Set([m[p?.[0]], m[p?.[1]]]); };
+    const dayToW = (day)=> ((new Date(day).getDay()+6)%7)+1; // 周一=1 ... 周日=7
+    function isRestDayForEmp(restPrefs, emp, day){ const p = restPrefs?.[emp]; if(!p) return false; const set = pairToSet(p); const w = dayToW(day); return set.has(w); }
+
+    function buildWhiteFiveTwo({employees, data, start, end, restPrefs}){
+      const dates = enumerateDates(start,end);
+      const next = {...data};
+      for(const d of dates){ const r={...(next[d]||{})}; for(const e of employees){ const cur = r[e]||''; if(cur==='夜' || cur==='中2') continue; r[e] = isRestDayForEmp(restPrefs,e,d) ? '休' : '白'; }
+        next[d]=r; }
+      return next;
+    }
+
+    function buildWorkBlocks(data, emp, start, end){
+      const days = enumerateDates(start, end);
+      const blocks = [];
+      let cur=[];
+      for(const d of days){ const v=getVal(data,d,emp); const work = (v!=='休' && v!=='夜' && v!=='中2'); if(work){ cur.push(d); } else { if(cur.length) { blocks.push(cur); cur=[]; } } }
+      if(cur.length) blocks.push(cur);
+      return blocks;
+    }
+    function cyclesForEmp(data, emp, start, end){
+      const blocks = buildWorkBlocks(data, emp, start, end);
+      const cycles=[]; for(const b of blocks){ const k = Math.floor(b.length/5); for(let i=0;i<k;i++){ cycles.push(b.slice(i*5, i*5+5)); } }
+      return cycles; // 每项是 5 个日期
+    }
+
+    function isRightEdgeWhite(data, day, emp){ const v=getVal(data,day,emp); if(v!=='白') return false; const t1=dateAdd(day,1); const nxt=getVal(data,t1,emp); return nxt!=='白'; }
+    function isLeftEdgeMid(data, day, emp){ const v=getVal(data,day,emp); if(v!=='中1') return false; const t0=dateAdd(day,-1); const pre=getVal(data,t0,emp); return pre!=='中1'; }
+
+    function dailyMidCount(data, day, employees){ const row=data[day]||{}; let c=0; for(const e of employees){ if(row[e]==='中1') c++; } return c; }
+    function dailyWhiteCount(data, day, employees){ const row=data[day]||{}; let c=0; for(const e of employees){ if(row[e]==='白') c++; } return c; }
+    function empMidCountInRange(data, emp, start, end){ let c=0; for(const d of enumerateDates(start,end)){ if(getVal(data,d,emp)==='中1') c++; } return c; }
+    function empWhiteCountInRange(data, emp, start, end){ let c=0; for(const d of enumerateDates(start,end)){ if(getVal(data,d,emp)==='白') c++; } return c; }
+
+    // 统计混合周期数量
+    function mixedCyclesCount(data, emp, start, end){
+      const cycles = cyclesForEmp(data, emp, start, end);
+      let c = 0;
+      for(const cyc of cycles){ let hasW=false, hasM=false; for(const d of cyc){ const v=getVal(data,d,emp); if(v==='白') hasW=true; if(v==='中1') hasM=true; } if(hasW && hasM) c++; }
+      return c;
+    }
+
+    // 个人最大连续上班天数
+    function longestRun(data, emp, start, end){
+      let max=0, cur=0; for(const d of enumerateDates(start,end)){ if(isWork(getVal(data,d,emp))){ cur++; max=Math.max(max,cur); } else { cur=0; } } return max; }
+
+    // 安全写入：检查 6 连班、相邻“中1→白”禁忌、混合周期上限
+    function trySetVal(next, day, emp, newV, {start, end, mixMaxRatio}){
+      const prev = getVal(next, day, emp);
+      if(prev === newV) return true;
+      if(wouldExceed6(next, emp, day, newV)) return false;
+      const prevDay = dateAdd(day, -1), nextDay = dateAdd(day, 1);
+      if(newV==='白' && getVal(next, prevDay, emp)==='中1') return false;
+      if(newV==='中1' && getVal(next, nextDay, emp)==='白') return false;
+      const tmp = JSON.parse(JSON.stringify(next));
+      setVal(tmp, day, emp, newV);
+      if(typeof mixMaxRatio==='number'){
+        const tot = cyclesForEmp(tmp, emp, start, end).length;
+        const allow = Math.ceil(tot * mixMaxRatio - 1e-9);
+        const mixed = mixedCyclesCount(tmp, emp, start, end);
+        if(mixed > allow) return false;
+      }
+      setVal(next, day, emp, newV);
+      return true;
+    }
+
+    function repairNoMidToWhite({data, employees, start, end}){
+      const next = {...data};
+      for(const e of employees){ const ds = enumerateDates(start,end); for(let i=0;i<ds.length-1;i++){ const a=ds[i], b=ds[i+1]; const va=getVal(next,a,e), vb=getVal(next,b,e); if(va==='中1' && vb==='白'){
+            if(!wouldExceed6(next, e, b, '中1')){ setVal(next, b, e, '中1'); } else { setVal(next, a, e, '白'); }
+          } }
+      }
+      return next;
+    }
+
+    function applyAlternateByCycle({employees, data, start, end}, mixMaxRatio=1){
+      const next = {...data};
+      employees.forEach((e,idx)=>{
+        const startIsWhite = (idx % 2 === 0);
+        const cycles = cyclesForEmp(next, e, start, end);
+        cycles.forEach((cyc,ci)=>{
+          const shouldMid = startIsWhite ? (ci % 2 === 1) : (ci % 2 === 0);
+          if(shouldMid){ for(const d of cyc){ if(isRightEdgeWhite(next, d, e)) trySetVal(next, d, e, '中1', {start,end,mixMaxRatio}); }
+          }
+        });
+      });
+      return repairNoMidToWhite({ data: next, employees, start, end });
+    }
+
+    function clampDailyByRange({employees, data, start, end, rMin=0.3, rMax=0.7, maxRounds=300, mixMaxRatio=1}){
+      let cur = JSON.parse(JSON.stringify(data));
+      const days = enumerateDates(start,end);
+      for(let round=0; round<maxRounds; round++){
+        let changed=false;
+        for(const d of days){
+          const W = dailyWhiteCount(cur,d,employees);
+          const M = dailyMidCount(cur,d,employees);
+          const A = W + M; if(A===0) continue;
+          const low = Math.ceil(rMin * W);
+          const high = Math.floor(rMax * W);
+          if(M > high){
+            let cands = employees.filter(e=> isLeftEdgeMid(cur, d, e));
+            cands = cands.sort((a,b)=> (empWhiteCountInRange(cur,b,start,end)>0?empMidCountInRange(cur,b,start,end)/empWhiteCountInRange(cur,b,start,end):99) - (empWhiteCountInRange(cur,a,start,end)>0?empMidCountInRange(cur,a,start,end)/empWhiteCountInRange(cur,a,start,end):99));
+            for(const e of cands){ if(trySetVal(cur, d, e, '白', {start,end,mixMaxRatio})) { changed=true; if(dailyMidCount(cur,d,employees) <= high) break; } }
+          } else if (M < low){
+            let cands = employees.filter(e=> isRightEdgeWhite(cur, d, e));
+            cands = cands.sort((a,b)=> (empWhiteCountInRange(cur,a,start,end)>0?empMidCountInRange(cur,a,start,end)/empWhiteCountInRange(cur,a,start,end):0) - (empWhiteCountInRange(cur,b,start,end)>0?empMidCountInRange(cur,b,start,end)/empWhiteCountInRange(cur,b,start,end):0));
+            for(const e of cands){ if(trySetVal(cur, d, e, '中1', {start,end,mixMaxRatio})) { changed=true; if(dailyMidCount(cur,d,employees) >= low) break; } }
+          }
+        }
+        if(!changed) break;
+      }
+      return repairNoMidToWhite({ data: cur, employees, start, end });
+    }
+
+    function clampPersonByRange({employees, data, start, end, pMin=0.3, pMax=0.7, maxRounds=240, mixMaxRatio=1}){
+      let cur = JSON.parse(JSON.stringify(data));
+      for(let round=0; round<maxRounds; round++){
+        let changed=false;
+        for(const e of employees){
+          const W = empWhiteCountInRange(cur,e,start,end);
+          const M = empMidCountInRange(cur,e,start,end);
+          if(W===0 && M===0) continue;
+          const low = Math.ceil(pMin * Math.max(1,W));
+          const high = Math.floor(pMax * Math.max(1,W));
+          if(M > high){
+            for(const d of enumerateDates(start,end)){
+              if(isLeftEdgeMid(cur, d, e)){
+                if(trySetVal(cur, d, e, '白', {start,end,mixMaxRatio})) { changed=true; break; }
+              }
+            }
+          } else if (M < low){
+            for(const d of enumerateDates(start,end)){
+              if(isRightEdgeWhite(cur, d, e)){
+                if(trySetVal(cur, d, e, '中1', {start,end,mixMaxRatio})) { changed=true; break; }
+              }
+            }
+          }
+        }
+        if(!changed) break;
+      }
+      return repairNoMidToWhite({ data: cur, employees, start, end });
+    }
+
+    function autoAssignNightAndM2({employees, data, start, end, override=false, nightRules}){
+      const rules = nightRules || { rest2AfterNight:{enabled:true, mandatory:true}, minInterval:3 };
+      const dates = enumerateDates(start,end);
+      const last = { 夜:{}, 中2:{} };
+      const total = { 夜:{}, 中2:{} };
+      for(const e of employees){ last['夜'][e]=null; last['中2'][e]=null; total['夜'][e]=0; total['中2'][e]=0; }
+      for(const d of dates){ const row=data[d]||{}; for(const e of employees){ const v=row[e]; if(v==='夜'){ last['夜'][e]=d; total['夜'][e]++; } if(v==='中2'){ last['中2'][e]=d; total['中2'][e]++; } } }
+      const newData = {...data};
+      function pick(kind, day){ const arr=employees.map(e=>{ const ls=last[kind][e]; const gap = ls? ((new Date(day)-new Date(ls))/86400000) : 999; const mean = employees.length? Object.values(total[kind]).reduce((a,b)=>a+b,0)/employees.length : 0; const deficit = mean - (total[kind][e]||0); const score = 0.6*gap + 0.4*deficit; return [e,score,gap]; }); arr.sort((a,b)=> b[1]-a[1]); for(const [e,_,gap] of arr){ const row=newData[day]||{}; const cur=row[e]||''; if(kind==='夜' && rules.minInterval>0 && gap < rules.minInterval) continue; if(!override && cur && cur!=='休' && cur!==kind) continue; if(cur==='夜' && kind==='中2') continue; if(kind==='中2'){ const y1=dateAdd(day,-1), y2=dateAdd(day,-2); if(getVal(newData,y1,e)==='夜' || getVal(newData,y2,e)==='夜') continue; } if(wouldExceed6(newData,e,day,kind)) continue; return e; } return null; }
+      for(const d of dates){ const row={...(newData[d]||{})}; if(!Object.values(row).includes('夜')){ const n=pick('夜',d); if(n){ row[n]='夜'; newData[d]=row; last['夜'][n]=d; total['夜'][n]++; for(let i=1;i<=2;i++){ const t=dateAdd(d,i); const r={...(newData[t]||{})}; r[n]='休'; newData[t]=r; } } }
+        const row2={...(newData[d]||{})}; if(!Object.values(row2).includes('中2')){ const m2=pick('中2',d); if(m2 && row2[m2]!=='夜'){ row2[m2] = (override? '中2' : (row2[m2]||'中2')); newData[d]=row2; last['中2'][m2]=d; total['中2'][m2]++; const next1=dateAdd(d,1); const r1={...(newData[next1]||{})}; if(r1[m2]==='白' || r1[m2]==='中1' || (r1[m2]||'')===''){ r1[m2]='休'; newData[next1]=r1; } } } }
+      for(const e of employees){ let run=0; for(const d of dates){ const v=getVal(newData,d,e); if(isWork(v)){ run++; if(run>6){ const r={...(newData[d]||{})}; if(r[e]!=='夜' && r[e]!=='中2'){ r[e]='休'; newData[d]=r; run=0; } } } else { run=0; } } }
+      return newData;
+    }
+
+    const MenuButton = ({active, icon, children, onClick}) => (
+      <button onClick={onClick} className={`relative w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-200 ${active? 'bg-indigo-50 text-indigo-700 side-active' : 'hover:bg-gray-100 text-gray-700'} `}>
+        <Icon name={icon} className={active? 'text-indigo-600' : 'text-gray-500'} />
+        <span className="text-sm font-medium">{children}</span>
+      </button>
+    );
+
+    function SideDock({tab,setTab}){
+      const [open,setOpen]=useState(false);
+      return (
+        <div className={`dock fixed left-0 top-16 bottom-6 w-11 z-40 flex items-center`} onMouseEnter={()=>setOpen(true)} onMouseLeave={()=>setOpen(false)}>
+          <div className={`dock-panel absolute left-2 top-0 bottom-0 w-60 transform transition-transform duration-200 ${open? 'translate-x-0':'-translate-x-[115%]'} bg-white rounded-xl shadow p-2 border`}>
+            <MenuButton active={tab==='grid'} icon="grid" onClick={()=>setTab('grid')}>排班表格</MenuButton>
+            <MenuButton active={tab==='batch'} icon="magic" onClick={()=>setTab('batch')}>自动分配班次</MenuButton>
+            <MenuButton active={tab==='users'} icon="users" onClick={()=>setTab('users')}>员工管理</MenuButton>
+            <MenuButton active={tab==='stats'} icon="chart" onClick={()=>setTab('stats')}>统计与对齐</MenuButton>
+            <MenuButton active={tab==='history'} icon="history" onClick={()=>setTab('history')}>历史版本</MenuButton>
+            <MenuButton active={tab==='settings'} icon="cog" onClick={()=>setTab('settings')}>设置 / 导出</MenuButton>
+          </div>
+          <div className="dock-tab absolute right-[-12px] top-1/2 -translate-y-1/2 w-6 h-18 rounded-r-lg flex items-center justify-center bg-white text-gray-700 cursor-pointer shadow" onClick={()=>setOpen(v=>!v)}>
+            <svg viewBox="0 0 20 20" className="w-4 h-4"><path d="M12 4l-6 6 6 6" fill="none" stroke="currentColor" strokeWidth="2"/></svg>
+          </div>
+        </div>
+      );
+    }
+
+    function LoginModal({onSuccess}){
+      const [username, setUsername] = useState('admin');
+      const [password, setPassword] = useState('');
+      const [err, setErr] = useState('');
+      async function doLogin(e){ e.preventDefault(); setErr(''); try{ const res = await apiPost('/login', { username, password }); onSuccess(res.user); } catch(ex){ setErr(ex.message||'登录失败'); } }
+      return (
+        <div className="fixed inset-0 bg-black/20 backdrop-blur flex items-center justify-center z-50">
+          <form onSubmit={doLogin} className="bg-white rounded-2xl shadow-xl p-6 w-[360px] animate-fade-in">
+            <h2 className="text-lg font-semibold mb-4 text-center">管理员登录</h2>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm text-gray-600 mb-1">用户名</label>
+                <input className="w-full border rounded px-3 py-2" value={username}
+                  onCompositionStart={()=>{}}
+                  onCompositionEnd={(e)=>setUsername(e.target.value)}
+                  onChange={e=>setUsername(e.target.value)} />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-600 mb-1">密码</label>
+                <input type="password" className="w-full border rounded px-3 py-2" value={password}
+                  onCompositionStart={()=>{}}
+                  onCompositionEnd={(e)=>setPassword(e.target.value)}
+                  onChange={e=>setPassword(e.target.value)} />
+              </div>
+              {err && <div className="text-sm text-red-600">{err}</div>}
+              <button type="submit" className="w-full rounded-full bg-indigo-600 hover:bg-indigo-500 text-white py-2 transition">登录</button>
+            </div>
+          </form>
+        </div>
+      );
+    }
+
+    function App(){
+      const [user, setUser] = useState(null);
+      useEffect(()=>{ (async()=>{ try{ const m = await apiGet('/me'); setUser(m.user||null); } catch{} })(); },[]);
+
+      const [team, setTeam] = useState('default');
+      const [note, setNote] = useState('');
+      const [start, setStart] = useState(monthRangeOf(today)[0]);
+      const [end, setEnd]     = useState(monthRangeOf(today)[1]);
+      const [employees, setEmployees] = useState([]);
+      const [data, setData] = useState({});
+      const [versionId, setVersionId] = useState(null);
+      const [versions, setVersions]   = useState([]);
+
+      // 运行与日志
+      const [prog, setProg] = useState({ running:false, stage:'', done:0, total:100 });
+      const [logs, setLogs] = useState([]);
+      const logEndRef = useRef(null);
+      const pushLog = (msg)=> setLogs(prev=> [...prev.slice(-199), `[${new Date().toLocaleTimeString()}] ${msg}`]);
+      useEffect(()=>{ if(prog.running){ const t = setInterval(()=>{ pushLog('心跳：计算中…'); }, 1000); return ()=> clearInterval(t); } }, [prog.running]);
+      useEffect(()=>{ logEndRef.current && logEndRef.current.scrollIntoView({behavior:'auto'}); }, [logs]);
+      const setStage = (stage, done, total)=> { setProg({ running:true, stage, done, total }); pushLog(stage); };
+      const endStage = ()=> { setProg({ running:false, stage:'完成', done:100, total:100 }); pushLog('执行完成'); };
+
+      // 运行期间置为只读
+      const editingLocked = prog.running;
+
+      const [batchChecked, setBatchChecked] = useState({});
+      const checkedList = useMemo(()=> employees.filter(e=>batchChecked[e]), [employees, batchChecked]);
+
+      const REST_STORE_KEY = 'scheduler_restprefs_store_v2';
+      function restStoreKey(team,start,end){ return `${team}__${start}__${end}`; }
+      function loadRestStore(){ try{ return JSON.parse(localStorage.getItem(REST_STORE_KEY)||'{}'); }catch{ return {}; } }
+      function saveRestStore(map){ try{ localStorage.setItem(REST_STORE_KEY, JSON.stringify(map||{})); }catch{} }
+      const [restPrefs, setRestPrefs] = useState({});
+      function saveRestForView(){ const map = loadRestStore(); map[restStoreKey(team,start,end)] = restPrefs; saveRestStore(map); }
+      function tryRestoreRestForView(){ const map = loadRestStore(); const hit = map[restStoreKey(team,start,end)]; if(hit && Object.keys(hit).length){ setRestPrefs(hit); } }
+      useEffect(()=>{ if(Object.keys(restPrefs||{}).length) saveRestForView(); }, [restPrefs, team, start, end]);
+      useEffect(()=>{ tryRestoreRestForView(); }, [team, start, end]);
+
+      const [shiftColors, setShiftColors] = useState({ '白':'#eef2ff','中1':'#e0f2fe','中2':'#cffafe','夜':'#fee2e2','休':'#f3f4f6' });
+      const [adminDays, setAdminDays] = useState(0);
+      const [nightWindows, setNightWindows] = useState([{ s:start, e:end }]);
+      const [nightOverride, setNightOverride] = useState(true);
+      const [nightRules, setNightRules] = useState({ rest2AfterNight:{enabled:true, mandatory:true}, minInterval:3 });
+
+      const [rMin, setRMin] = useState(0.3);
+      const [rMax, setRMax] = useState(0.7);
+      const [pMin, setPMin] = useState(0.3);
+      const [pMax, setPMax] = useState(0.7);
+      const [mixMax, setMixMax] = useState(1); // 混合周期比例上限
+
+      const DRAFT_KEY = 'scheduler_main_v2_draft';
+      useEffect(()=>{
+        try{ const d = JSON.parse(localStorage.getItem(DRAFT_KEY)||'null'); if(d){ setTeam(d.team||'default'); setStart(d.start||start); setEnd(d.end||end); setEmployees(d.employees||[]); setData(d.data||{}); setVersionId(d.versionId||null); setShiftColors(d.shiftColors||shiftColors); setAdminDays(Number(d.adminDays||0)); setRestPrefs(d.restPrefs||{}); setNightWindows(d.nightWindows||[{s:start,e:end}]); setNightOverride(!!d.nightOverride); setNightRules(d.nightRules||nightRules); setRMin(typeof d.rMin==='number'?d.rMin:0.3); setRMax(typeof d.rMax==='number'?d.rMax:0.7); setPMin(typeof d.pMin==='number'?d.pMin:0.3); setPMax(typeof d.pMax==='number'?d.pMax:0.7); setMixMax(typeof d.mixMax==='number'?d.mixMax:1); } else { tryRestoreRestForView(); } }catch{}
+      },[]);
+      useEffect(()=>{
+        try{ const snap={team,start,end,employees,data,versionId,shiftColors,adminDays,restPrefs,nightWindows,nightOverride,nightRules,rMin,rMax,pMin,pMax,mixMax}; localStorage.setItem(DRAFT_KEY, JSON.stringify(snap)); }catch{}
+      }, [team,start,end,employees,data,versionId,shiftColors,adminDays,restPrefs,nightWindows,nightOverride,nightRules,rMin,rMax,pMin,pMax,mixMax]);
+
+      async function loadFromServer(){ try { const res = await apiGet(`/schedule?team=${encodeURIComponent(team)}&start=${start}&end=${end}`); setEmployees(res.employees||[]); setData(res.data||{}); setVersionId(res.version_id||null); if(res.rest_prefs){ setRestPrefs(res.rest_prefs); } if(typeof res.mixMax==='number'){ setMixMax(res.mixMax); } tryRestoreRestForView(); } catch(e){ globalErr(e.message); } }
+      async function saveToServer(){ try{ const operator = (user && (user.display_name || user.username)) || '管理员'; const body = { team, viewStart:start, viewEnd:end, employees, data, baseVersionId: versionId, note, operator, adminDays, restPrefs, nightRules, rMin,rMax,pMin,pMax, mixMax }; const res = await apiPost('/schedule/save', body); setVersionId(res.version_id||null);} catch(e){ if(e.payload && e.payload.code===409){ if(confirm('服务器已有新版本，是否加载最新并覆盖？')) await loadFromServer(); return; } globalErr(e.message); } }
+      async function loadVersions(){ try{ const res = await apiGet(`/schedule/versions?team=${encodeURIComponent(team)}&start=${start}&end=${end}`); setVersions(res.versions||[]); } catch(e){ globalErr(e.message); } }
+      async function loadVersionById(id){ try{ const res = await apiGet(`/version?id=${id}`); setEmployees(res.employees||[]); setData(res.data||{}); setVersionId(id); if(res.rest_prefs){ setRestPrefs(res.rest_prefs); } if(typeof res.mixMax==='number'){ setMixMax(res.mixMax); } tryRestoreRestForView(); } catch(e){ globalErr(e.message); } }
+      async function doLogout(){ try{ await apiPost('/logout',{}); setUser(null);}catch{} }
+      function exportExcel(){ const url = `${API_BASE}/export/xlsx?team=${encodeURIComponent(team)}&start=${start}&end=${end}`; window.location.href=url; }
+
+      const dateList = useMemo(()=> enumerateDates(start, end), [start,end]);
+      const activeCellRef = useRef(null);
+      function setCellByIndex(dIndex, eIndex, value){ const d = dateList[dIndex]; const emp = employees[eIndex]; if(!d||!emp) return; setData(prev=>{ const next = { ...prev }; const row = { ...(next[d]||{}) }; row[emp] = value; next[d] = row; return next; }); }
+      function onFocusCell(dIndex, eIndex){ activeCellRef.current = { dIndex, eIndex }; }
+      function moveActive(dx, dy){ const cur = activeCellRef.current || { dIndex:0, eIndex:0 }; const ni = Math.max(0, Math.min((cur.dIndex||0) + dy, dateList.length-1)); const nj = Math.max(0, Math.min((cur.eIndex||0) + dx, employees.length-1)); activeCellRef.current = { dIndex: ni, eIndex: nj }; const id = `cell-${ni}-${nj}`; const el = document.getElementById(id); if(el) el.focus(); }
+      function onKeyDownCell(e){ if(e.isComposing) return; if(e.key==='Enter'){ e.preventDefault(); moveActive(1,0); } else if(e.key==='ArrowRight'){ e.preventDefault(); moveActive(1,0); } else if(e.key==='ArrowLeft'){ e.preventDefault(); moveActive(-1,0); } else if(e.key==='ArrowDown'){ e.preventDefault(); moveActive(0,1); } else if(e.key==='ArrowUp'){ e.preventDefault(); moveActive(0,-1); } }
+
+      function clearRange(mode='empty'){
+        setData(prev=>{ const next={...prev}; for(const d of dateList){ const r={...(next[d]||{})}; for(const e of employees){ r[e] = (mode==='rest')? '休' : ''; } next[d]=r; } return next; });
+      }
+
+      const dailyStats = useMemo(()=>{ const m={}; for(const d of dateList){ const row=data[d]||{}; const stat={总:0, 白:0, 中1:0, 中2:0, 夜:0}; for(const e of employees){ const v=row[e]; if(!v || v==='休') continue; stat['总']++; if(v==='白') stat['白']++; else if(v==='中1') stat['中1']++; else if(v==='中2') stat['中2']++; else if(v==='夜') stat['夜']++; } m[d]=stat; } return m; }, [data, dateList, employees]);
+
+      const nightIssues = useMemo(()=>{ const issues={}; function inAnyWin(day){ for(const w of nightWindows){ if(!w.s||!w.e) continue; if(day>=w.s && day<=w.e) return true; } return false; } for(const d of dateList){ if(!inAnyWin(d)) continue; const row=data[d]||{}; const vals=Object.values(row); const hasN = vals.includes('夜'); const hasM2 = vals.includes('中2'); let msg=''; if(!hasN && !hasM2) msg='缺夜&中2'; else if(!hasN) msg='缺夜'; else if(!hasM2) msg='缺中2'; if(msg) issues[d]=msg; } return issues; }, [nightWindows, data, dateList]);
+
+      // —— 新增：全局单个浮动班次选择器 ——
+      const [picker, setPicker] = useState({ open:false, di:null, ei:null, x:0, y:0 });
+      const pickerRef = useRef(null);
+      useEffect(()=>{
+        function onDocDown(ev){ if(!picker.open) return; if(pickerRef.current && !pickerRef.current.contains(ev.target)) setPicker(p=>({...p, open:false})); }
+        document.addEventListener('mousedown', onDocDown);
+        return ()=> document.removeEventListener('mousedown', onDocDown);
+      }, [picker.open]);
+
+      const gridEmpCounts = useMemo(()=> countByEmpInRange(employees, data, start, end), [employees, data, start, end]);
+
+      const ViewGrid = (
+        <Section title="排班表格" right={<span className="text-sm text-gray-500">提示：点击单元格→直接输入或从 Excel 粘贴；支持 IME 连续输入 {editingLocked && <span className='inline-flex items-center gap-1 text-rose-600 ml-2'><Icon name='lock'/>执行中：只读</span>}</span>}>
+          {employees.length===0 ? (
+            <div className="text-sm text-gray-500">请先在「员工管理」中添加员工。</div>
+          ) : (
+            <>
+              <div className="grid-wrap border rounded-xl shadow-inner" onPaste={(e)=>{ if(editingLocked) return; const cur = activeCellRef.current; if(!cur) return; const text = e.clipboardData.getData('text'); if(!text) return; e.preventDefault(); const rows = text.replace(/\r/g,'').split('\n').filter(x=>x.length>0).map(r=>r.split(/\t|,/)); const baseI = cur.eIndex; const baseD = cur.dIndex; setData(prev=>{ const next = { ...prev }; for(let r=0; r<rows.length; r++){ const d = dateList[baseD + r]; if(!d) break; const row = { ...(next[d]||{}) }; for(let c=0; c<rows[r].length; c++){ const emp = employees[baseI + c]; if(!emp) break; row[emp] = rows[r][c]; } next[d] = row; } return next; }); }}>
+                <table className="min-w-max text-sm w-full">
+                  <thead>
+                    <tr className="bg-gray-50">
+                      <th className="sticky py-2 px-3 text-left left-sticky" style={{minWidth:'8.5rem'}}>日期</th>
+                      <th className="sticky py-2 px-3 text-left left-sticky-2" style={{minWidth:'6.5rem'}}>星期</th>
+                      <th className="sticky py-2 px-3 text-left left-sticky-3" style={{minWidth:'9rem'}}>问题</th>
+                      {employees.map(e=> {
+                        const diff = (gridEmpCounts[e]?.总||0) - Number(adminDays||0);
+                        const diffCls = diff===0? 'bg-gray-100 text-gray-700' : (diff>0? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700');
+                        return (
+                          <th key={e} className="sticky py-2 px-3 text-left">
+                            <div className="flex items-center gap-2">
+                              <span>{e}</span>
+                              <span className={`badge ${diffCls}`} title="差值=实际总天数-行政班应上天数">{diff>0?`+${diff}`:diff}</span>
+                            </div>
+                          </th>
+                        );
+                      })}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dateList.map((d,di)=> {
+                      const w = dow(d); const weekend=(w===0||w===6);
+                      const row=data[d]||{}; const issue = nightIssues[d]||'';
+                      const stat = dailyStats[d]||{总:0,白:0,中1:0,中2:0,夜:0};
+                      return (
+                        <tr key={d} className={"border-t hover:bg-indigo-50/30 "+(weekend? 'bg-gray-50' : '')}>
+                          <td className={`py-1.5 px-3 font-medium text-gray-800 left-sticky`} style={{minWidth:'8.5rem'}}>
+                            <div className="flex items-center gap-2"><span>{d}</span></div>
+                            <div className="text-xs text-gray-500">在岗 {stat['总']}（白 {stat['白']} / 中1 {stat['中1']} / 中2 {stat['中2']} / 夜 {stat['夜']}）</div>
+                          </td>
+                          <td className="py-1.5 px-3 text-gray-500 left-sticky-2" style={{minWidth:'6.5rem'}}>周{WN[w]}</td>
+                          <td className="py-1.5 px-3 left-sticky-3" style={{minWidth:'9rem'}}>
+                            {issue? <span className={`badge ${issue==='缺夜&中2'?'bg-red-100 text-red-700':'bg-amber-100 text-amber-700'}`}>{issue}</span> : <span className="text-gray-400">—</span>}
+                          </td>
+                          {employees.map((e,ei)=> {
+                            const v = (data[d]&&data[d][e])||'';
+                            const bg = shiftColors[v] || undefined;
+                            return (
+                              <td key={e} className="py-1.5 px-3">
+                                <div className="cell-wrap">
+                                  <input list="shift-options" id={`cell-${di}-${ei}`} className="cell border rounded-lg px-2 py-1.5 focus:ring-2 focus:ring-indigo-300 focus:outline-none transition disabled:bg-gray-100"
+                                    style={{ backgroundColor: bg }} value={v}
+                                    disabled={editingLocked}
+                                    title={editingLocked? '执行中：只读' : ''}
+                                    onFocus={()=>onFocusCell(di,ei)} onKeyDown={onKeyDownCell}
+                                    onCompositionStart={(ev)=>{ ev.target.isComposing = true; }}
+                                    onCompositionEnd={(ev)=>{ ev.target.isComposing = false; setCellByIndex(di, ei, ev.currentTarget.value); }}
+                                    onChange={ev=> setCellByIndex(di, ei, ev.target.value)} placeholder="白/中1/中2/夜/休 或留空" />
+                                  <button className="cell-toggle" disabled={editingLocked} aria-label="选择班次" title="选择班次"
+                                    onClick={(ev)=>{ ev.preventDefault(); ev.stopPropagation(); const el=document.getElementById(`cell-${di}-${ei}`); if(!el) return; const rect=el.getBoundingClientRect(); setPicker({ open:true, di, ei, x: rect.left + window.scrollX, y: rect.bottom + window.scrollY + 4 }); }}>
+                                    ▾
+                                  </button>
+                                </div>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                <datalist id="shift-options">
+                  {SHIFT_TYPES.map(s=> <option key={s} value={s} />)}
+                </datalist>
+              </div>
+            </>
+          )}
+        </Section>
+      );
+
+      function EmployeeChecklist(){
+        const [kw, setKw] = useState('');
+        const filtered = useMemo(()=>{ const k = kw.trim().toLowerCase(); return k ? employees.filter(e=> e.toLowerCase().includes(k)) : employees; }, [kw, employees]);
+        const listRef = useRef(null);
+        const withStay = (cb)=>{ const el=listRef.current; const st=el?el.scrollTop:0; cb(); requestAnimationFrame(()=>{ if(el) el.scrollTop = st; }); };
+        const selectedCount = filtered.filter(n=> !!batchChecked[n]).length;
+        const allSelected = filtered.length>0 && selectedCount===filtered.length;
+        return (
+          <div className="border rounded-xl p-3">
+            <input className="border rounded px-2 py-1 text-sm w-full mb-2" placeholder="搜索姓名…" value={kw} onChange={e=>setKw(e.target.value)} />
+            <div className="flex items-center justify-between text-xs text-gray-600 mb-2">
+              <div>当前筛选：{filtered.length} 人；已选 {selectedCount} 人</div>
+              <div className="space-x-2">
+                <button className={`px-2 py-1 rounded border ${editingLocked?'opacity-50 cursor-not-allowed':''}`} disabled={editingLocked} onClick={()=> withStay(()=>{ const next={...batchChecked}; filtered.forEach(n=> next[n]=true); setBatchChecked(next); })}>全选</button>
+                <button className={`px-2 py-1 rounded border ${editingLocked?'opacity-50 cursor-not-allowed':''}`} disabled={editingLocked} onClick={()=> withStay(()=> setBatchChecked(prev=>{ const next={...prev}; filtered.forEach(n=> next[n]=!prev[n]); return next; }))}>反选</button>
+                <button className={`px-2 py-1 rounded border ${editingLocked?'opacity-50 cursor-not-allowed':''}`} disabled={editingLocked} onClick={()=> withStay(()=> setBatchChecked(prev=>{ const next={...prev}; filtered.forEach(n=> { next[n]=false; }); return next; }))}>清空</button>
+              </div>
+            </div>
+            <div ref={listRef} className="max-h-64 overflow-auto divide-y">
+              {filtered.map(name=> (
+                <label key={name} className="flex items-center gap-2 py-1">
+                  <input type="checkbox" disabled={editingLocked} checked={!!batchChecked[name]} onChange={()=> withStay(()=> setBatchChecked(p=>({ ...p, [name]: !p[name] })))} />
+                  <span className="text-sm">{name}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        );
+      }
+
+      function MainRulePanel(){
+        async function runMainRule(){
+          const targets = checkedList.length? checkedList : employees;
+          if(targets.length===0){ alert('请先勾选人员'); return; }
+
+          setStage('阶段 1/5：拉齐白班（5白+2休）', 10, 100);
+          let cur = buildWhiteFiveTwo({ employees: targets, data, start, end, restPrefs });
+          setData(cur); await new Promise(r=>setTimeout(r, 20));
+
+          setStage('阶段 2/5：按周期交替错开放中班', 30, 100);
+          cur = applyAlternateByCycle({ employees: targets, data: cur, start, end }, mixMax);
+          setData(cur); await new Promise(r=>setTimeout(r, 20));
+
+          setStage('阶段 3/5：按天比例收敛', 55, 100);
+          cur = clampDailyByRange({ employees: targets, data: cur, start, end, rMin, rMax, maxRounds: 300, mixMaxRatio: mixMax });
+          setData(cur); await new Promise(r=>setTimeout(r, 20));
+
+          setStage('阶段 4/5：个人比例收敛', 80, 100);
+          for(let sweep=0; sweep<8; sweep++){
+            cur = clampDailyByRange({ employees: targets, data: cur, start, end, rMin, rMax, maxRounds: 220, mixMaxRatio: mixMax });
+            cur = clampPersonByRange({ employees: targets, data: cur, start, end, pMin, pMax, maxRounds: 260, mixMaxRatio: mixMax });
+            pushLog(`循环微调：第 ${sweep+1} 轮`);
+          }
+          setData(cur); await new Promise(r=>setTimeout(r, 20));
+
+          setStage('阶段 5/5：校验并微调', 95, 100);
+          cur = repairNoMidToWhite({ data: cur, employees: targets, start, end });
+          setData(cur);
+
+          endStage();
+        }
+
+        return (
+          <div className="bg-white rounded-xl border p-3 space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+              <div className="space-y-2">
+                <div className="font-medium text-gray-700">每日比例（中1:白）</div>
+                <div className="flex items-center gap-2">
+                  <span>1 :</span>
+                  <input type="number" step="0.05" min="0" max="3" className="w-24 border rounded px-2 py-1" value={rMin} onChange={(e)=> setRMin(Math.max(0, Math.min(3, parseFloat(e.target.value||'0'))))} />
+                  <span>~</span>
+                  <input type="number" step="0.05" min="0" max="3" className="w-24 border rounded px-2 py-1" value={rMax} onChange={(e)=> setRMax(Math.max(0, Math.min(3, parseFloat(e.target.value||'0'))))} />
+                  <span className="text-gray-400">（示例：1:0.4~0.6）</span>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <div className="font-medium text-gray-700">个人比例（中1:白）</div>
+                <div className="flex items-center gap-2">
+                  <span>1 :</span>
+                  <input type="number" step="0.05" min="0" max="3" className="w-24 border rounded px-2 py-1" value={pMin} onChange={(e)=> setPMin(Math.max(0, Math.min(3, parseFloat(e.target.value||'0'))))} />
+                  <span>~</span>
+                  <input type="number" step="0.05" min="0" max="3" className="w-24 border rounded px-2 py-1" value={pMax} onChange={(e)=> setPMax(Math.max(0, Math.min(3, parseFloat(e.target.value||'0'))))} />
+                  <span className="text-gray-400">（示例：1:0.4~0.6）</span>
+                </div>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <div className="font-medium text-gray-700">混合周期上限（比例）</div>
+              <div className="flex items-center gap-2 text-sm">
+                <span>混合周期 ≤ 总周期 ×</span>
+                <input type="number" step="0.05" min="0" max="1" className="w-24 border rounded px-2 py-1" value={mixMax} onChange={(e)=> setMixMax(Math.max(0, Math.min(1, parseFloat(e.target.value||'0'))))} />
+                <span className="text-gray-400">（例如：0.5 表示有白且有中的周期不超过一半）</span>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <PillBtn color="indigo" onClick={runMainRule} disabled={prog.running}>开始自动排班</PillBtn>
+              <button className={`px-3 py-1.5 rounded-full bg-gray-100 text-sm ${editingLocked? 'opacity-50 cursor-not-allowed':''}`} disabled={editingLocked} onClick={()=> setData(buildWhiteFiveTwo({ employees: checkedList.length?checkedList:employees, data, start, end, restPrefs }))}>只拉齐白班（5+2）</button>
+              <button className={`px-3 py-1.5 rounded-full bg-gray-100 text-sm ${editingLocked? 'opacity-50 cursor-not-allowed':''}`} disabled={editingLocked} onClick={()=> setData(repairNoMidToWhite({ data, employees: checkedList.length?checkedList:employees, start, end }))}>一键校验/修复“中→白”相邻</button>
+            </div>
+
+            <div className="text-xs text-gray-500">规则说明：① 全程禁止生成“中1→白”相邻；② 严格遵守最多 6 天连续上班；③ 混合周期（白+中1 同在一周期）不超过设定比例；④ 夜/中2 不参与本算法但保留；⑤ 多轮“按天→按人”收敛，优先确保你的目标约束而非速度。</div>
+          </div>
+        );
+      }
+
+      function NightPanel(){
+        return (
+          <div className="bg-white rounded-xl border p-3">
+            <h4 className="font-medium mb-2">夜班窗口（每天尽量有 夜 + 中2）</h4>
+            <div className="space-y-2">
+              {nightWindows.map((w,i)=> (
+                <div key={i} className="flex flex-wrap items-end gap-2">
+                  <label className="text-sm">开始 <input type="date" value={w.s} onChange={e=> setNightWindows(arr=>{ const a=[...arr]; a[i]={...a[i], s:e.target.value}; return a; })} className="border rounded px-2 py-1 ml-1"/></label>
+                  <label className="text-sm">结束 <input type="date" value={w.e} onChange={e=> setNightWindows(arr=>{ const a=[...arr]; a[i]={...a[i], e:e.target.value}; return a; })} className="border rounded px-2 py-1 ml-1"/></label>
+                  <button className="px-2 py-1 border rounded" onClick={()=> setNightWindows(arr=> arr.filter((_,idx)=> idx!==i))}>删除</button>
+                </div>
+              ))}
+              <button className="px-3 py-1.5 border rounded" onClick={()=> setNightWindows(a=> [...a, {s:start,e:end}])}>新增一段</button>
+            </div>
+
+            <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={nightOverride} onChange={e=> setNightOverride(e.target.checked)} /> 应用夜/中2时允许覆盖现有班次</label>
+              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={nightRules.rest2AfterNight.enabled} onChange={e=> setNightRules(r=>({...r, rest2AfterNight:{...r.rest2AfterNight, enabled:e.target.checked}}))}/> 夜后休 2 天</label>
+              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={nightRules.rest2AfterNight.mandatory} onChange={e=> setNightRules(r=>({...r, rest2AfterNight:{...r.rest2AfterNight, mandatory:e.target.checked}}))}/> 强制改休</label>
+              <label className="inline-flex items-center gap-2">最小夜班间隔（天）<input type="number" className="w-20 border rounded px-2 py-1" value={nightRules.minInterval} onChange={e=> setNightRules(r=>({...r, minInterval: Math.max(0, parseInt(e.target.value||'0'))}))}/></label>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3 mt-3 text-sm">
+              <PillBtn color="emerald" onClick={()=>{
+                if(checkedList.length===0){ alert('请先勾选人员'); return; }
+                let newD={...data};
+                for(const w of nightWindows){ if(!w.s||!w.e) continue; newD = autoAssignNightAndM2({ employees: checkedList, data:newD, start:w.s, end:w.e, override: nightOverride, nightRules }); }
+                setData(newD);
+              }}>AI 一键分配 夜/中2（按窗口，多段）</PillBtn>
+              <span className="text-xs text-gray-500">规则：夜后两天必须休；夜后两天禁止该员工中2；中2后一天强制休。</span>
+            </div>
+          </div>
+        );
+      }
+
+      const ViewBatch = (
+        <Section title="自动分配班次" right={editingLocked? <span className='text-rose-600 text-sm inline-flex items-center gap-1'><Icon name='lock'/>执行中：只读浏览</span>: null}>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
+            <div className="lg:col-span-1"><h3 className="font-medium mb-2">选择人员</h3><EmployeeChecklist/></div>
+            <div className="lg:col-span-2 space-y-4"><MainRulePanel/><NightPanel/></div>
+          </div>
+        </Section>
+      );
+
+      const [empInput, setEmpInput] = useState('');
+      const ViewEmployees = (
+        <Section title="员工管理" right={<span className="text-sm text-gray-500">休息偏好保存在服务器与本地（跨视图持久）</span>}>
+          <div className="grid grid-cols-1">
+            <div className="mb-4">
+              <label className="block text-sm text-gray-600 mb-1">批量添加（每行/逗号分隔）</label>
+              <div className="flex gap-2 items-start">
+                <textarea className="flex-1 border rounded px-3 py-2 h-24" value={empInput}
+                  onCompositionStart={()=>{}}
+                  onCompositionEnd={(e)=>{ setEmpInput(e.target.value); }}
+                  onChange={e=>setEmpInput(e.target.value)} placeholder="张三\n李四" />
+                <PillBtn onClick={()=>{ empInput.split(/\n|,|\s+/).forEach(n=>{ const name=(n||'').trim(); if(name && !employees.includes(name)) setEmployees(prev=>[...prev, name]); }); setEmpInput(''); }} disabled={editingLocked} title={editingLocked?'执行中：只读':''}>添加</PillBtn>
+              </div>
+            </div>
+            <div className="overflow-auto">
+              <table className="text-sm min-w-[760px] w-full">
+                <thead>
+                  <tr className="text-gray-500"><th className="text-left">姓名</th><th className="text-left">本次休息偏好</th><th className="text-left">操作</th></tr>
+                </thead>
+                <tbody>
+                  {employees.map(e=> (
+                    <tr key={e} className="border-t hover:bg-gray-50">
+                      <td className="py-1">{e}</td>
+                      <td className="py-1">
+                        <div className="flex items-center gap-2">
+                          {REST_PAIRS.map(p=> (
+                            <label key={p} className={`px-2 py-1 rounded border cursor-pointer ${restPrefs[e]===p? 'bg-indigo-50 border-indigo-300 text-indigo-700':'hover:bg-gray-50'} ${editingLocked?'opacity-60 cursor-not-allowed':''}`}>
+                              <input type="radio" name={`rest-${e}`} disabled={editingLocked} className="mr-1" checked={restPrefs[e]===p} onChange={()=> setRestPrefs(r=> ({...r, [e]: p}))} /> 休{p}
+                            </label>
+                          ))}
+                          <button className={`px-2 py-1 rounded border ${editingLocked?'opacity-60 cursor-not-allowed':''}`} disabled={editingLocked} onClick={()=> setRestPrefs(r=>{ const x={...r}; delete x[e]; return x; })}>清除偏好</button>
+                        </div>
+                      </td>
+                      <td className="py-1"><button className={`text-red-600 ${editingLocked?'opacity-60 cursor-not-allowed':''}`} disabled={editingLocked} onClick={()=>{
+                        setEmployees(prev=> prev.filter(x=>x!==e));
+                        setData(prev=>{ const next={...prev}; for(const d of Object.keys(next)){ if(next[d] && (e in (next[d]||{}))){ const r={...next[d]}; delete r[e]; next[d]=r; } } return next; });
+                        setRestPrefs(r=>{ const x={...r}; delete x[e]; return x; });
+                      }}>删除</button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="mt-3"><PillBtn color="emerald" onClick={saveToServer} disabled={editingLocked} title={editingLocked?'执行中：只读':''}>保存人员与偏好到服务器</PillBtn></div>
+          </div>
+        </Section>
+      );
+
+      function periodRanges(){
+        const dS=new Date(start);
+        const yS = fmt(new Date(dS.getFullYear(),0,1)); const yE = fmt(new Date(dS.getFullYear(),11,31));
+        const q = Math.floor(dS.getMonth()/3); const qS = fmt(new Date(dS.getFullYear(), q*3, 1)); const qE = fmt(new Date(dS.getFullYear(), q*3+3, 0));
+        const mS = fmt(new Date(dS.getFullYear(), dS.getMonth(), 1)); const mE = fmt(new Date(dS.getFullYear(), dS.getMonth()+1, 0));
+        return { y:{s:yS,e:yE}, q:{s:qS,e:qE}, m:{s:mS,e:mE}, r:{s:start,e:end} };
+      }
+      const ViewStats = (()=>{
+        const ranges = periodRanges();
+        const [statPeriod, setStatPeriod] = useState('r');
+        const [orderBy, setOrderBy] = useState('default');
+        const cur = statPeriod==='y'? ranges.y : statPeriod==='q'? ranges.q : statPeriod==='m'? ranges.m : ranges.r;
+        const daysLen = useMemo(()=> enumerateDates(cur.s, cur.e).length, [cur.s, cur.e]);
+        const C = useMemo(()=> countByEmpInRange(employees, data, cur.s, cur.e), [employees,data,statPeriod,start,end]);
+        const avg = useMemo(()=>{ const sum={白:0,中1:0,中2:0,夜:0,总:0}; for(const e of employees){ sum.白+=C[e]?.白||0; sum.中1+=C[e]?.中1||0; sum.中2+=C[e]?.中2||0; sum.夜+=C[e]?.夜||0; sum.总+=C[e]?.总||0; } const n = Math.max(1, employees.length); return { 白:(sum.白/n).toFixed(1), 中1:(sum.中1/n).toFixed(1), 中2:(sum.中2/n).toFixed(1), 夜:(sum.夜/n).toFixed(1), 总:(sum.总/n).toFixed(1) }; }, [employees, C]);
+
+        // —— 新增：每日分布与总和分析 ——
+        const daySeries = useMemo(()=>{
+          const list = enumerateDates(cur.s, cur.e);
+          return list.map(d=>{
+            const row = data[d]||{}; let W=0,M=0,N2=0,N=0; for(const e of employees){ const v=row[e]; if(!v||v==='休') continue; if(v==='白') W++; else if(v==='中1') M++; else if(v==='中2') N2++; else if(v==='夜') N++; } const total=W+M+N2+N; return { d, W, M, N2, N, total };
+          });
+        }, [data, employees, cur.s, cur.e]);
+        const sumTotals = useMemo(()=> daySeries.reduce((acc,s)=>{ acc.白+=s.W; acc.中1+=s.M; acc.中2+=s.N2; acc.夜+=s.N; acc.总+=s.total; return acc; }, {白:0,中1:0,中2:0,夜:0,总:0}), [daySeries]);
+        const restTotal = useMemo(()=> employees.length*daysLen - sumTotals.总, [employees.length, daysLen, sumTotals.总]);
+        const peakMid = useMemo(()=> daySeries.reduce((best,s)=> s.M>best.val ? {d:s.d, val:s.M} : best, {d:'—', val:-1}), [daySeries]);
+        const peakWhite = useMemo(()=> daySeries.reduce((best,s)=> s.W>best.val ? {d:s.d, val:s.W} : best, {d:'—', val:-1}), [daySeries]);
+
+        const rows = useMemo(()=>{
+          const arr = employees.map(e=>{
+            const total=C[e]?.总||0; const W=C[e]?.白||0; const M=C[e]?.中1||0; const N2=C[e]?.中2||0; const N=C[e]?.夜||0;
+            const ratio = (W>0? (M/W) : (M>0? Infinity:0));
+            const ratioStr = (ratio===Infinity? '∞' : ratio.toFixed(2));
+            const diff = total - Number(adminDays||0);
+            const restDays = daysLen - total; // 统计期内的休/空
+            const cycTot = cyclesForEmp(data, e, cur.s, cur.e).length; const cycMix = mixedCyclesCount(data, e, cur.s, cur.e); const cycRatio = cycTot>0? (cycMix/cycTot) : 0;
+            const longest = longestRun(data, e, cur.s, cur.e);
+            const pass = (ratio!==Infinity && W>0) ? (ratio >= pMin && ratio <= pMax) : (W===0? (M===0) : false);
+            const mixOk = cycRatio <= (mixMax||1);
+            return { e, W, M, N2, N, total, diff, ratio, ratioStr, restDays, cycTot, cycMix, cycRatio, longest, pass, mixOk };
+          });
+          switch(orderBy){
+            case 'diff': arr.sort((a,b)=> (b.diff)-(a.diff)); break;
+            case 'longest': arr.sort((a,b)=> (b.longest)-(a.longest)); break;
+            case 'ratioDev': arr.sort((a,b)=> Math.abs((b.ratio||0)-( (pMin+pMax)/2 )) - Math.abs((a.ratio||0)-( (pMin+pMax)/2 )) ); break;
+            case 'mix': arr.sort((a,b)=> (b.cycRatio)-(a.cycRatio)); break;
+            default: break;
+          }
+          return arr;
+        }, [employees, C, daysLen, adminDays, pMin, pMax, mixMax, orderBy, data, cur.s, cur.e]);
+
+        return (
+          <Section title={`统计与对齐（${cur.s} ~ ${cur.e}）`} right={<div className="flex items-center gap-2 text-sm"><label>周期：</label><select className="border rounded px-2 py-1" value={statPeriod} onChange={e=>setStatPeriod(e.target.value)}><option value="y">年度</option><option value="q">季度</option><option value="m">月度</option><option value="r">当前选区</option></select><label className="ml-3">排序：</label><select className="border rounded px-2 py-1" value={orderBy} onChange={e=>setOrderBy(e.target.value)}><option value="default">默认</option><option value="diff">差值</option><option value="longest">最长连班</option><option value="ratioDev">中/白偏差</option><option value="mix">混合比例</option></select></div>}>
+            {/* 均值卡片 */}
+            <div className="mb-3 grid grid-cols-2 md:grid-cols-5 gap-2 text-sm">
+              <div className="rounded-xl border p-2 bg-gradient-to-br from-indigo-50 to-white"><div className="text-xs text-gray-500">平均白</div><div className="text-lg font-semibold text-indigo-700">{avg.白}</div></div>
+              <div className="rounded-xl border p-2 bg-gradient-to-br from-sky-50 to-white"><div className="text-xs text-gray-500">平均中1</div><div className="text-lg font-semibold text-sky-700">{avg.中1}</div></div>
+              <div className="rounded-xl border p-2 bg-gradient-to-br from-cyan-50 to-white"><div className="text-xs text-gray-500">平均中2</div><div className="text-lg font-semibold text-cyan-700">{avg.中2}</div></div>
+              <div className="rounded-xl border p-2 bg-gradient-to-br from-rose-50 to-white"><div className="text-xs text-gray-500">平均夜</div><div className="text-lg font-semibold text-rose-700">{avg.夜}</div></div>
+              <div className="rounded-xl border p-2 bg-gradient-to-br from-emerald-50 to-white"><div className="text-xs text-gray-500">平均总</div><div className="text-lg font-semibold text-emerald-700">{avg.总}</div></div>
+            </div>
+
+            {/* 新增：总和分析卡片 */}
+            <div className="mb-4 grid grid-cols-2 md:grid-cols-6 gap-2 text-sm">
+              <div className="rounded-xl border p-2 bg-indigo-50/60"><div className="text-xs text-gray-500">白（总人次）</div><div className="text-lg font-semibold text-indigo-700">{sumTotals.白}</div></div>
+              <div className="rounded-xl border p-2 bg-sky-50/60"><div className="text-xs text-gray-500">中1（总人次）</div><div className="text-lg font-semibold text-sky-700">{sumTotals.中1}</div></div>
+              <div className="rounded-xl border p-2 bg-cyan-50/60"><div className="text-xs text-gray-500">中2（总人次）</div><div className="text-lg font-semibold text-cyan-700">{sumTotals.中2}</div></div>
+              <div className="rounded-xl border p-2 bg-rose-50/60"><div className="text-xs text-gray-500">夜（总人次）</div><div className="text-lg font-semibold text-rose-700">{sumTotals.夜}</div></div>
+              <div className="rounded-xl border p-2 bg-emerald-50/60"><div className="text-xs text-gray-500">在岗（总人次）</div><div className="text-lg font-semibold text-emerald-700">{sumTotals.总}</div></div>
+              <div className="rounded-xl border p-2 bg-gray-50"><div className="text-xs text-gray-500">休（估算）</div><div className="text-lg font-semibold text-gray-800">{restTotal}</div></div>
+            </div>
+
+            {/* 新增：每日分布（可滚动迷你热力/构成条）*/}
+            <div className="overflow-auto rounded-xl border">
+              <table className="text-sm min-w-[780px] w-full">
+                <thead className="bg-gray-50">
+                  <tr className="text-gray-500">
+                    <th className="text-left py-2 px-3">日期</th>
+                    <th className="text-right py-2 px-3">在岗</th>
+                    <th className="text-left py-2 px-3 w-[320px]">构成（白 / 中1 / 中2 / 夜）</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {daySeries.map(s=>{
+                    const pW = s.total? Math.round(s.W/s.total*100) : 0;
+                    const pM = s.total? Math.round(s.M/s.total*100) : 0;
+                    const pM2= s.total? Math.round(s.N2/s.total*100) : 0;
+                    const pN = s.total? Math.round(s.N/s.total*100) : 0;
+                    return (
+                      <tr key={s.d} className="border-t hover:bg-gray-50">
+                        <td className="py-1.5 px-3">{s.d}</td>
+                        <td className="py-1.5 px-3 text-right">{s.total}</td>
+                        <td className="py-1.5 px-3">
+                          <div className="h-3 rounded-full bg-gray-100 overflow-hidden flex">
+                            <div style={{width:`${pW}%`, background: shiftColors['白']}} title={`白 ${s.W}`}></div>
+                            <div style={{width:`${pM}%`, background: shiftColors['中1']}} title={`中1 ${s.M}`}></div>
+                            <div style={{width:`${pM2}%`, background: shiftColors['中2']}} title={`中2 ${s.N2}`}></div>
+                            <div style={{width:`${pN}%`, background: shiftColors['夜']}} title={`夜 ${s.N}`}></div>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* 极值提示 */}
+            <div className="mt-3 text-xs text-gray-600">高峰提示：中1最多 {peakMid.val<0?0:peakMid.val}（{peakMid.d}），白班最多 {peakWhite.val<0?0:peakWhite.val}（{peakWhite.d}）。</div>
+
+            {/* 调参与结果表 */}
+            <div className="flex items-center gap-2 mb-3 mt-4 text-sm">
+              <label className="inline-flex items-center gap-2">行政班应上天数（当前周期）：<input type="number" className="w-24 border rounded px-2 py-1" value={adminDays} onChange={e=> setAdminDays(Number(e.target.value||0))}/></label>
+              <span className="text-gray-500">差值= 实际总天数 - 行政班应上天数（正=超出，负=不足）</span>
+            </div>
+            <div className="overflow-auto">
+              <table className="text-sm min-w-[1100px] w-full">
+                <thead>
+                  <tr className="text-gray-500">
+                    <th className="text-left">姓名</th>
+                    {['白','中1','中2','夜','总','休','差值','中/白','中/白达标','最长连班','混合周期','混合达标','建议'].map((h,i)=> <th key={i} className={`text-right pr-3 ${i===0?'text-left':''}`}>{h}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map(r=> (
+                    <tr key={r.e} className="border-t hover:bg-gray-50">
+                      <td className="py-1 text-left">{r.e}</td>
+                      {[r.W, r.M, r.N2, r.N, r.total, r.restDays, r.diff, r.ratioStr].map((v,idx)=> <td key={idx} className={`py-1 text-right pr-3 ${idx===6&&(v<0?'text-red-600':v>0?'text-emerald-600':'text-gray-700')}`}>{v}</td>)}
+                      <td className="py-1 text-right pr-3">{r.pass? <span className="badge bg-emerald-100 text-emerald-700">达标</span> : <span className="badge bg-rose-100 text-rose-700">未达标</span>}</td>
+                      <td className={`py-1 text-right pr-3 ${r.longest>6?'text-rose-600 font-medium':''}`}>{r.longest}</td>
+                      <td className={`py-1 text-right pr-3`}>{r.cycMix}/{r.cycTot}（{(r.cycRatio*100).toFixed(0)}%）</td>
+                      <td className="py-1 text-right pr-3">{r.mixOk? <span className="badge bg-emerald-100 text-emerald-700">OK</span> : <span className="badge bg-rose-100 text-rose-700">超限</span>}</td>
+                      <td className="py-1 text-right pr-3 text-gray-700">{(()=>{ if(adminDays>0){ if(r.diff>0) return `建议减 ${r.diff}`; if(r.diff<0) return `建议补 ${-r.diff}`; } return '—'; })()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Section>
+        );
+      })();
+
+      const ViewHistory = (
+        <Section title="历史版本">
+          {versions.length===0 ? (
+            <p className="text-sm text-gray-500">暂无版本。点击顶部“保存新版本”生成，或点“从服务器加载”同步。</p>
+          ) : (
+            <div className="overflow-auto max-h-64">
+              <table className="text-sm w-full">
+                <thead>
+                  <tr className="text-gray-500"><th className="text-left">版本ID</th><th className="text-left">时间</th><th className="text-left">备注</th><th className="text-left">操作者</th><th></th></tr>
+                </thead>
+                <tbody>
+                  {versions.map(v=> (
+                    <tr key={v.id} className="border-t hover:bg-gray-50">
+                      <td className="py-1">{v.id}</td>
+                      <td className="py-1">{v.created_at}</td>
+                      <td className="py-1">{v.note||''}</td>
+                      <td className="py-1">{v.created_by_name||'管理员'}</td>
+                      <td className="py-1"><button className="text-indigo-600 hover:underline" onClick={()=>loadVersionById(v.id)}>载入</button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Section>
+      );
+
+      const ViewSettings = (
+        <Section title="设置 / 导出">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm text-gray-600 mb-1">保存备注</label>
+              <input className="w-full border rounded px-3 py-2" value={note}
+                onCompositionStart={()=>{}}
+                onCompositionEnd={(e)=>{ setNote(e.target.value); }}
+                onChange={e=>setNote(e.target.value)} placeholder="例如：10月第一版"/>
+            </div>
+            <div className="flex items-end gap-2">
+              <PillBtn onClick={exportExcel} color="sky" disabled={editingLocked} title={editingLocked?'执行中：只读':''}>服务器导出 Excel/CSV</PillBtn>
+              <button onClick={loadVersions} className={`px-4 py-2 rounded-full text-white transition ${editingLocked? 'bg-gray-300 cursor-not-allowed':'bg-gray-800 hover:bg-gray-700'}`} disabled={editingLocked}>刷新版本列表</button>
+            </div>
+          </div>
+          <div className="mt-6">
+            <h3 className="font-semibold mb-2">班次颜色（同步保存到浏览器）</h3>
+            <div className="flex flex-wrap gap-4 items-center text-sm">
+              {['白','中1','中2','夜','休'].map(s=> (
+                <label key={s} className={`flex items-center gap-2 ${editingLocked?'opacity-60':''}`}><span className="w-10 text-right">{s}</span><input type="color" disabled={editingLocked} value={shiftColors[s]||'#ffffff'} onChange={e=> setShiftColors(p=>({ ...p, [s]: e.target.value }))} /></label>
+              ))}
+              <button className={`px-3 py-1.5 rounded ${editingLocked?'bg-gray-200 cursor-not-allowed':'bg-gray-100 hover:bg-gray-200'}`} disabled={editingLocked} onClick={()=> setShiftColors({'白':'#eef2ff','中1':'#e0f2fe','中2':'#cffafe','夜':'#fee2e2','休':'#f3f4f6'})}>恢复默认</button>
+            </div>
+          </div>
+        </Section>
+      );
+
+      const Topbar = (
+        <div className="sticky top-0 z-30 bg-gradient-to-b from-white/90 to-white/60 backdrop-blur border-b">
+          <div className="max-w-[1400px] mx-auto px-4 py-3 flex items-center gap-3">
+            <h1 className="text-xl font-bold text-indigo-600">排班助手（测试版）</h1>
+            <div className="flex-1"></div>
+            <div className="hidden lg:flex items-center gap-2 text-sm">
+              <input className={`border rounded px-3 py-1.5 ${editingLocked?'bg-gray-100':''}`} value={team}
+                disabled={editingLocked}
+                onCompositionStart={()=>{}}
+                onCompositionEnd={(e)=>{ setTeam(e.target.value); }}
+                onChange={e=>setTeam(e.target.value)} title="团队/组" />
+              <input type="date" className={`border rounded px-3 py-1.5 ${editingLocked?'bg-gray-100':''}`} value={start} onChange={e=>setStart(e.target.value)} disabled={editingLocked} />
+              <span className="text-gray-400">—</span>
+              <input type="date" className={`border rounded px-3 py-1.5 ${editingLocked?'bg-gray-100':''}`} value={end} onChange={e=>setEnd(e.target.value)} disabled={editingLocked} />
+            </div>
+            <div className="flex items-center gap-2">
+              <PillBtn onClick={loadFromServer} disabled={editingLocked}>从服务器加载</PillBtn>
+              <PillBtn onClick={saveToServer} color="emerald" disabled={editingLocked}>保存新版本</PillBtn>
+              <PillBtn onClick={exportExcel} color="sky" disabled={editingLocked}>导出</PillBtn>
+              <button onClick={()=> clearRange('empty')} className={`px-3 py-1.5 rounded-full text-sm ${editingLocked?'bg-gray-200 cursor-not-allowed':'bg-amber-100 hover:bg-amber-200'}`} disabled={editingLocked}>清空当前范围</button>
+              <button onClick={()=> clearRange('rest')} className={`px-3 py-1.5 rounded-full text-sm ${editingLocked?'bg-gray-200 cursor-not-allowed':'bg-rose-100 hover:bg-rose-200'}`} disabled={editingLocked}>清空并填“休”</button>
+              {user ? (<button onClick={async()=>{ await apiPost('/logout',{}).catch(()=>{}); setUser(null); }} className={`px-3 py-1.5 rounded-full text-sm ${editingLocked?'bg-gray-200 cursor-not-allowed':'bg-gray-200 hover:bg-gray-300'}`} disabled={editingLocked}>退出</button>) : (<span className="text-xs text-gray-500">未登录</span>)}
+            </div>
+          </div>
+          {Object.keys(nightIssues).length>0 && (
+            <div className="max-w-[1400px] mx-auto px-4 pb-2 text-sm text-red-600">夜班窗口缺：{Object.entries(nightIssues).slice(0,10).map(([k,v])=>`${k}${v==='缺夜&中2'?'(缺夜&中2)':v==='缺夜'?'(缺夜)':'(缺中2)'}`).join('，')}{Object.keys(nightIssues).length>10?' …':''}</div>
+          )}
+        </div>
+      );
+
+      const [tab, setTab] = useState('batch');
+      const content = ({ grid: ViewGrid, batch: ViewBatch, users: ViewEmployees, stats: ViewStats, history: ViewHistory, settings: ViewSettings }[tab]) || ViewBatch;
+
+      return (
+        <div className="min-h-screen">
+          {Topbar}
+          <div className="max-w-[1400px] mx-auto px-4 py-6">
+            <SideDock tab={tab} setTab={setTab}/>
+            <main className="animate-fade-in">{content}<footer className="text-center text-xs text-gray-400 py-6">© 排班助手（测试版） v2.3</footer></main>
+          </div>
+
+          {prog.running && (
+            <div className="floating-progress">
+              <div className="fp-card rounded-2xl p-4 animate-fade-in">
+                <div className="flex items-center justify-between text-sm font-medium text-indigo-700"><span>排班执行中</span><span>{Math.round(prog.done/prog.total*100)}%</span></div>
+                <div className="mt-2 h-2 rounded-full bg-white/60 overflow-hidden"><div className="h-2 bg-indigo-500 transition-all" style={{width: `${Math.round(prog.done/prog.total*100)}%`}}></div></div>
+                <div className="mt-2 text-xs text-gray-600">{prog.stage}</div>
+                <div className="mt-2 logbox p-2 text-[12px] text-gray-700">
+                  {logs.map((l,i)=> <div key={i} className="leading-5">{l}</div>)}
+                  <div ref={logEndRef}></div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 全局班次选择器 */}
+          {picker.open && (
+            <div className="fixed z-50" style={{ left: picker.x, top: picker.y }}>
+              <div ref={pickerRef} className="picker bg-white border rounded-xl p-1 w-40">
+                {SHIFT_TYPES.map(s=> (
+                  <button key={s} className="w-full text-left px-3 py-2 rounded hover:bg-gray-100" onClick={()=>{ setCellByIndex(picker.di, picker.ei, s); setPicker(p=>({...p, open:false})); }}>{s}</button>
+                ))}
+                <div className="h-px bg-gray-100 my-1"></div>
+                <button className="w-full text-left px-3 py-2 rounded hover:bg-gray-100" onClick={()=>{ setCellByIndex(picker.di, picker.ei, ''); setPicker(p=>({...p, open:false})); }}>清空</button>
+              </div>
+            </div>
+          )}
+
+          {!user && <LoginModal onSuccess={setUser} />}
+        </div>
+      );
+    }
+
+    ;(function selfTests(){
+      try{
+        const list = enumerateDates('2025-10-01','2025-10-03');
+        console.assert(list.length===3 && list[0]==='2025-10-01' && list[2]==='2025-10-03', 'enumerateDates 测试未通过');
+
+        const base = {}; enumerateDates('2025-10-06','2025-10-19').forEach(d=> base[d] = { '甲':'', '乙':'', '丙':'' });
+        const rest = { '甲':'56', '乙':'56', '丙':'56' };
+        let d0 = buildWhiteFiveTwo({ employees:['甲','乙','丙'], data:base, start:'2025-10-06', end:'2025-10-19', restPrefs:rest });
+        let alt = applyAlternateByCycle({ employees:['甲','乙','丙'], data:d0, start:'2025-10-06', end:'2025-10-19' }, 0.5);
+        let dayClamp = clampDailyByRange({ employees:['甲','乙','丙'], data:alt, start:'2025-10-06', end:'2025-10-19', rMin:0.3, rMax:0.7, maxRounds:80, mixMaxRatio:0.5 });
+        let perClamp = clampPersonByRange({ employees:['甲','乙','丙'], data:dayClamp, start:'2025-10-06', end:'2025-10-19', pMin:0.3, pMax:0.7, maxRounds:100, mixMaxRatio:0.5 });
+        let fixed = repairNoMidToWhite({ data: perClamp, employees:['甲','乙','丙'], start:'2025-10-06', end:'2025-10-19' });
+
+        let ok=true; const ds = enumerateDates('2025-10-06','2025-10-19');
+        for(let i=0;i<ds.length-1;i++){ ['甲','乙','丙'].forEach((nm)=>{ const a=fixed[ds[i]]?.[nm]; const b=fixed[ds[i+1]]?.[nm]; if(a==='中1' && b==='白'){ ok=false; } }); }
+        console.assert(ok, '出现了中1→白相邻，违例');
+
+        console.log('%c自检通过','color:green');
+      }catch(err){ globalErr('自检失败：' + (err && err.message || err)); console.error(err); }
+    })();
+
+    try{ const root = ReactDOM.createRoot(document.getElementById('root')); root.render(<App/>); }
+    catch(err){ globalErr('运行错误：' + (err && err.message || err)); console.error(err); }
+  </script>
+</body>
+</html>
