@@ -57,7 +57,15 @@ function db(): PDO {
   } catch (Throwable $e) {
     // 已有 payload 列时忽略
   }
-  $pdo->exec("CREATE INDEX IF NOT EXISTS idx_sv_team_range ON schedule_versions(team, view_start, view_end, id);");
+$pdo->exec("CREATE INDEX IF NOT EXISTS idx_sv_team_range ON schedule_versions(team, view_start, view_end, id);");
+
+$pdo->exec("
+  CREATE TABLE IF NOT EXISTS org_config (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    payload TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+  );
+");
   return $pdo;
 }
 
@@ -128,6 +136,9 @@ function build_schedule_payload(array $row, string $teamFallback): array {
   } else {
     $merged['employees'] = array_values($merged['employees']);
   }
+  if (!isset($merged['yearlyOptimize'])) {
+    $merged['yearlyOptimize'] = false;
+  }
   $dataMerged = $merged['data'] ?? [];
   if (!is_array($dataMerged)) {
     $merged['data'] = (object)[];
@@ -139,13 +150,20 @@ function build_schedule_payload(array $row, string $teamFallback): array {
   return $merged;
 }
 
-function compute_history_profile(PDO $pdo, string $team, ?string $beforeStart = null): array {
+function compute_history_profile(PDO $pdo, string $team, ?string $beforeStart = null, ?string $yearStart = null): array {
   $profile = [
     'shiftTotals' => [],
     'periodCount' => 0,
     'lastAssignments' => [],
     'ranges' => [],
   ];
+
+  if ($beforeStart !== null && $beforeStart === '') {
+    $beforeStart = null;
+  }
+  if ($yearStart !== null && $yearStart === '') {
+    $yearStart = null;
+  }
 
   $sql = "SELECT id, view_start, view_end, payload, employees, data FROM schedule_versions WHERE team=?";
   $params = [$team];
@@ -162,6 +180,8 @@ function compute_history_profile(PDO $pdo, string $team, ?string $beforeStart = 
     return $profile;
   }
 
+  $lastAssignmentDay = null;
+
   foreach ($rows as $index => $row) {
     $payload = decode_json_assoc($row['payload'] ?? '');
     $data = $payload['data'] ?? decode_json_assoc($row['data'] ?? '');
@@ -177,8 +197,12 @@ function compute_history_profile(PDO $pdo, string $team, ?string $beforeStart = 
         $profile['shiftTotals'][$emp] = ['white' => 0, 'mid' => 0, 'mid2' => 0, 'night' => 0, 'total' => 0];
       }
     }
+    $hasEligibleDay = false;
     foreach ($data as $day => $assignments) {
       if (!is_array($assignments)) continue;
+      if ($beforeStart && strcmp((string)$day, (string)$beforeStart) >= 0) continue;
+      if ($yearStart && strcmp((string)$day, (string)$yearStart) < 0) continue;
+      $hasEligibleDay = true;
       foreach ($assignments as $emp => $val) {
         if (!isset($profile['shiftTotals'][$emp])) {
           $profile['shiftTotals'][$emp] = ['white' => 0, 'mid' => 0, 'mid2' => 0, 'night' => 0, 'total' => 0];
@@ -204,29 +228,19 @@ function compute_history_profile(PDO $pdo, string $team, ?string $beforeStart = 
             break;
         }
       }
-    }
-    if ($index === 0) {
-      $lastDay = null;
-      foreach (array_keys($data) as $day) {
-        if ($lastDay === null || strcmp((string)$day, (string)$lastDay) > 0) {
-          $lastDay = $day;
-        }
-      }
-      if ($lastDay !== null) {
-        $assignments = $data[$lastDay] ?? [];
-        if (is_array($assignments)) {
-          foreach ($assignments as $emp => $val) {
-            $profile['lastAssignments'][$emp] = $val;
-          }
-        }
+      if ($lastAssignmentDay === null || strcmp((string)$day, (string)$lastAssignmentDay) > 0) {
+        $lastAssignmentDay = $day;
+        $profile['lastAssignments'] = is_array($assignments) ? $assignments : [];
       }
     }
-    $profile['periodCount']++;
-    $profile['ranges'][] = [
-      'start' => $row['view_start'] ?? '',
-      'end' => $row['view_end'] ?? '',
-      'id' => isset($row['id']) ? (int)$row['id'] : null,
-    ];
+    if ($hasEligibleDay) {
+      $profile['periodCount']++;
+      $profile['ranges'][] = [
+        'start' => $row['view_start'] ?? '',
+        'end' => $row['view_end'] ?? '',
+        'id' => isset($row['id']) ? (int)$row['id'] : null,
+      ];
+    }
   }
 
   return $profile;
@@ -269,6 +283,12 @@ switch (true) {
     $team  = (string)($_GET['team']  ?? 'default');
     $start = (string)($_GET['start'] ?? '');
     $end   = (string)($_GET['end']   ?? '');
+    $historyYearStart = (string)($_GET['historyYearStart'] ?? ($_GET['history_year_start'] ?? ''));
+    if ($historyYearStart === '') {
+      $historyYearStart = null;
+    } elseif (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $historyYearStart)) {
+      $historyYearStart = null;
+    }
     if (!$team) send_error('参数缺失', 400);
 
     $pdo = db();
@@ -297,7 +317,7 @@ switch (true) {
     if (!$row) {
       $viewStart = $start ?: date('Y-m-01');
       $viewEnd = $end ?: date('Y-m-t');
-      $historyProfile = compute_history_profile($pdo, $team, $start ?: null);
+      $historyProfile = compute_history_profile($pdo, $team, $start ?: null, $historyYearStart);
       send_json([
         'team'      => $team,
         'viewStart' => $viewStart,
@@ -312,11 +332,12 @@ switch (true) {
         'version_id'=> null,
         'versionId' => null,
         'historyProfile' => $historyProfile,
+        'yearlyOptimize' => false,
       ]);
     } else {
       $result = build_schedule_payload($row, $team);
       $rangeStart = $start ?: ($row['view_start'] ?? null);
-      $result['historyProfile'] = compute_history_profile($pdo, $team, $rangeStart);
+      $result['historyProfile'] = compute_history_profile($pdo, $team, $rangeStart, $historyYearStart);
       send_json($result);
     }
 
@@ -382,6 +403,7 @@ switch (true) {
       'albumAutoNote' => $in['albumAutoNote'] ?? null,
       'albumHistory' => $in['albumHistory'] ?? null,
       'historyProfile' => $in['historyProfile'] ?? null,
+      'yearlyOptimize' => $in['yearlyOptimize'] ?? null,
       'operator' => $operator ?: '管理员',
     ];
     $snapshotJson = json_encode($snapshot, JSON_UNESCAPED_UNICODE);
@@ -473,7 +495,7 @@ switch (true) {
     $team = $row['team'] ?? 'default';
     $result = build_schedule_payload($row, $team);
     $rangeStart = $result['viewStart'] ?? ($row['view_start'] ?? null);
-    $result['historyProfile'] = compute_history_profile($pdo, $team, $rangeStart);
+    $result['historyProfile'] = compute_history_profile($pdo, $team, $rangeStart, null);
     send_json($result);
 
   // 删除历史版本
@@ -487,6 +509,47 @@ switch (true) {
     $stmt->execute([$id, $team]);
     if ($stmt->rowCount() === 0) send_error('记录不存在或已删除', 404);
     send_json(['ok' => true, 'deleted' => true]);
+
+  case $method === 'GET' && $path === '/org-config':
+    $pdo = db();
+    $stmt = $pdo->query('SELECT payload, updated_at FROM org_config WHERE id = 1 LIMIT 1');
+    $row = $stmt->fetch();
+    $payload = [];
+    if ($row && isset($row['payload'])) {
+      $decoded = decode_json_assoc($row['payload']);
+      if ($decoded) {
+        $payload = $decoded;
+      }
+    }
+    send_json([
+      'config' => $payload,
+      'updated_at' => $row['updated_at'] ?? null,
+    ]);
+
+  case $method === 'POST' && $path === '/org-config':
+    $in = json_input();
+    $config = $in['config'] ?? [];
+    if (is_object($config)) {
+      $config = json_decode(json_encode($config, JSON_UNESCAPED_UNICODE), true);
+    }
+    if (!is_array($config)) {
+      send_error('配置格式错误', 400);
+    }
+    $json = json_encode($config, JSON_UNESCAPED_UNICODE);
+    if ($json === false) {
+      $json = json_encode($config, JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR);
+    }
+    if ($json === false) {
+      send_error('配置保存失败', 500);
+    }
+    $pdo = db();
+    $stmt = $pdo->prepare("
+      INSERT INTO org_config(id, payload, updated_at)
+      VALUES(1, ?, datetime('now','localtime'))
+      ON CONFLICT(id) DO UPDATE SET payload=excluded.payload, updated_at=excluded.updated_at
+    ");
+    $stmt->execute([$json]);
+    send_json(['ok' => true]);
 
   // 导出：优先 XLSX，失败回退 CSV
   case $method === 'GET' && $path === '/export/xlsx':
