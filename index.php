@@ -234,9 +234,21 @@ function compute_history_profile(PDO $pdo, string $team, ?string $beforeStart = 
 
 // ===== 路由 =====
 $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-$path = preg_replace('#^/api#', '', $path) ?: '/';
 $method = $_SERVER['REQUEST_METHOD'];
-
+$path = preg_replace('#^/api#', '', $path) ?: '/';
+$servingIndex = ($method === 'GET') && ($path === '/' || $path === '/index.html');
+if ($servingIndex) {
+  $indexFile = __DIR__ . '/index.html';
+  if (is_file($indexFile)) {
+    header('Content-Type: text/html; charset=utf-8');
+    readfile($indexFile);
+    exit;
+  }
+  http_response_code(500);
+  header('Content-Type: text/plain; charset=utf-8');
+  echo 'index.html 缺失';
+  exit;
+}
 if ($method === 'OPTIONS') { http_response_code(204); exit; }
 
 // ===== 接口实现 =====

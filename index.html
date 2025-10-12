@@ -1029,6 +1029,59 @@
       );
     });
 
+    const MonthInput = React.memo(function MonthInputComponent({ value, onChange, disabled=false, className='', placeholder='YYYY-MM' }){
+      const [draft, setDraft] = useState(()=> value || '');
+      useEffect(()=>{ setDraft(value || ''); }, [value]);
+      const format = (raw)=>{
+        const digits = String(raw||'').replace(/[^0-9]/g,'');
+        let next = digits.slice(0,4);
+        if(digits.length > 4){
+          next += '-' + digits.slice(4,6);
+        }
+        return next;
+      };
+      const commit = (input)=>{
+        if(!onChange) return;
+        if(!input){ onChange(''); return; }
+        const match = input.match(/^(\d{4})(?:-(\d{1,2}))?$/);
+        if(!match){ onChange(value || ''); return; }
+        const year = match[1];
+        const monthRaw = match[2] ?? '';
+        const monthNum = monthRaw ? parseInt(monthRaw, 10) : NaN;
+        const month = Number.isFinite(monthNum) ? Math.min(12, Math.max(1, monthNum)) : 1;
+        const normalized = `${year}-${String(month).padStart(2,'0')}`;
+        onChange(normalized);
+        setDraft(normalized);
+      };
+      const handleChange = (e)=>{
+        if(disabled) return;
+        const formatted = format(e.target.value);
+        setDraft(formatted);
+        if(formatted.length >= 7){
+          commit(formatted);
+        } else if(formatted === ''){
+          if(onChange) onChange('');
+        }
+      };
+      const handleBlur = ()=>{
+        if(disabled) return;
+        if(!draft){
+          if(onChange) onChange('');
+          return;
+        }
+        commit(draft);
+      };
+      return (
+        <input type="text" inputMode="numeric" pattern="\d{4}-\d{2}" className={className}
+          value={draft}
+          placeholder={placeholder}
+          disabled={disabled}
+          onChange={handleChange}
+          onBlur={handleBlur}
+        />
+      );
+    });
+
     function App(){
       const [user, setUser] = useState(null);
       useEffect(()=>{ (async()=>{ try{ await apiPost('/logout',{}); } catch{} finally { setUser(null); } })(); },[]);
