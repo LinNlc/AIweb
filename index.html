@@ -923,7 +923,7 @@
       );
 
 
-    function MonthInput({ value, onChange, disabled=false, className='', placeholder='YYYY-MM' }){
+    const MonthInput = React.memo(function MonthInputComponent({ value, onChange, disabled=false, className='', placeholder='YYYY-MM' }){
       const [draft, setDraft] = useState(()=> value || '');
       useEffect(()=>{ setDraft(value || ''); }, [value]);
       const format = (raw)=>{
@@ -974,8 +974,7 @@
           onBlur={handleBlur}
         />
       );
-    }
-    }
+    });
 
     function App(){
       const [user, setUser] = useState(null);
