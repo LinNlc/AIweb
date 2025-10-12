@@ -10,8 +10,22 @@ error_reporting(E_ALL);
 date_default_timezone_set('Asia/Shanghai');
 
 // ===== SQLite 连接 & 初始化 =====
-const DB_FILE = __DIR__ . '/data/data.sqlite';
-@mkdir(__DIR__ . '/data', 0770, true);
+$legacyDbFile = '/opt/1panel/apps/openresty/openresty/www/sites/xn--wyuz77ayygl2b/index/api/data/data.sqlite';
+$defaultDbDir = __DIR__ . '/data';
+$defaultDbFile = $defaultDbDir . '/data.sqlite';
+
+$dbFile = $defaultDbFile;
+if (is_file($legacyDbFile)) {
+  $dbFile = $legacyDbFile;
+} elseif (is_dir(dirname($legacyDbFile)) && is_writable(dirname($legacyDbFile))) {
+  $dbFile = $legacyDbFile;
+} else {
+  @mkdir($defaultDbDir, 0770, true);
+}
+
+if (!defined('DB_FILE')) {
+  define('DB_FILE', $dbFile);
+}
 
 function db(): PDO {
   static $pdo = null;
@@ -34,9 +48,15 @@ function db(): PDO {
       data TEXT NOT NULL,       -- JSON object: { 'YYYY-MM-DD': { '张三':'夜', ... } }
       note TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
-      created_by_name TEXT      -- 记录操作者名字（无登录时来自前端 operator）
+      created_by_name TEXT,     -- 记录操作者名字（无登录时来自前端 operator）
+      payload TEXT              -- 完整配置快照 JSON
     );
   ");
+  try {
+    $pdo->exec('ALTER TABLE schedule_versions ADD COLUMN payload TEXT');
+  } catch (Throwable $e) {
+    // 已有 payload 列时忽略
+  }
   $pdo->exec("CREATE INDEX IF NOT EXISTS idx_sv_team_range ON schedule_versions(team, view_start, view_end, id);");
   return $pdo;
 }
@@ -70,6 +90,148 @@ function cn_week(string $ymd): string {
   return ['日','一','二','三','四','五','六'][$w] ?? '';
 }
 
+function decode_json_assoc(?string $json): array {
+  if ($json === null || $json === '') return [];
+  $decoded = json_decode($json, true);
+  return is_array($decoded) ? $decoded : [];
+}
+
+function build_schedule_payload(array $row, string $teamFallback): array {
+  $employees = array_values(decode_json_assoc($row['employees'] ?? ''));
+  $dataRaw = decode_json_assoc($row['data'] ?? '');
+  $payloadExtra = decode_json_assoc($row['payload'] ?? '');
+  $base = [
+    'team' => $row['team'] ?? $teamFallback,
+    'viewStart' => $row['view_start'] ?? '',
+    'viewEnd' => $row['view_end'] ?? '',
+    'start' => $row['view_start'] ?? '',
+    'end' => $row['view_end'] ?? '',
+    'employees' => $employees,
+    'data' => $dataRaw,
+    'note' => $row['note'] ?? '',
+    'version_id' => isset($row['id']) ? (int)$row['id'] : null,
+    'versionId' => isset($row['id']) ? (int)$row['id'] : null,
+    'created_at' => $row['created_at'] ?? null,
+    'created_by_name' => $row['created_by_name'] ?? null,
+  ];
+  $merged = $payloadExtra ? array_replace($base, $payloadExtra) : $base;
+  if (empty($merged['team'])) $merged['team'] = $teamFallback;
+  if (empty($merged['viewStart'])) $merged['viewStart'] = $base['viewStart'];
+  if (empty($merged['viewEnd'])) $merged['viewEnd'] = $base['viewEnd'];
+  if (empty($merged['start'])) $merged['start'] = $merged['viewStart'];
+  if (empty($merged['end'])) $merged['end'] = $merged['viewEnd'];
+  if (!isset($merged['note'])) $merged['note'] = $base['note'];
+  if (!isset($merged['version_id'])) $merged['version_id'] = $base['version_id'];
+  if (!isset($merged['versionId'])) $merged['versionId'] = $base['versionId'];
+  if (!isset($merged['employees']) || !is_array($merged['employees'])) {
+    $merged['employees'] = $employees;
+  } else {
+    $merged['employees'] = array_values($merged['employees']);
+  }
+  $dataMerged = $merged['data'] ?? [];
+  if (!is_array($dataMerged)) {
+    $merged['data'] = (object)[];
+  } elseif (!count($dataMerged)) {
+    $merged['data'] = (object)[];
+  } else {
+    $merged['data'] = $dataMerged;
+  }
+  return $merged;
+}
+
+function compute_history_profile(PDO $pdo, string $team, ?string $beforeStart = null): array {
+  $profile = [
+    'shiftTotals' => [],
+    'periodCount' => 0,
+    'lastAssignments' => [],
+    'ranges' => [],
+  ];
+
+  $sql = "SELECT id, view_start, view_end, payload, employees, data FROM schedule_versions WHERE team=?";
+  $params = [$team];
+  if ($beforeStart) {
+    $sql .= " AND view_end < ?";
+    $params[] = $beforeStart;
+  }
+  $sql .= " ORDER BY view_end DESC, id DESC LIMIT 24";
+
+  $stmt = $pdo->prepare($sql);
+  $stmt->execute($params);
+  $rows = $stmt->fetchAll();
+  if (!$rows) {
+    return $profile;
+  }
+
+  foreach ($rows as $index => $row) {
+    $payload = decode_json_assoc($row['payload'] ?? '');
+    $data = $payload['data'] ?? decode_json_assoc($row['data'] ?? '');
+    if (!is_array($data)) {
+      $data = [];
+    }
+    $employees = $payload['employees'] ?? json_decode($row['employees'] ?? '[]', true);
+    if (!is_array($employees)) {
+      $employees = [];
+    }
+    foreach ($employees as $emp) {
+      if (!isset($profile['shiftTotals'][$emp])) {
+        $profile['shiftTotals'][$emp] = ['white' => 0, 'mid' => 0, 'mid2' => 0, 'night' => 0, 'total' => 0];
+      }
+    }
+    foreach ($data as $day => $assignments) {
+      if (!is_array($assignments)) continue;
+      foreach ($assignments as $emp => $val) {
+        if (!isset($profile['shiftTotals'][$emp])) {
+          $profile['shiftTotals'][$emp] = ['white' => 0, 'mid' => 0, 'mid2' => 0, 'night' => 0, 'total' => 0];
+        }
+        switch ($val) {
+          case '白':
+            $profile['shiftTotals'][$emp]['white']++;
+            $profile['shiftTotals'][$emp]['total']++;
+            break;
+          case '中1':
+            $profile['shiftTotals'][$emp]['mid']++;
+            $profile['shiftTotals'][$emp]['total']++;
+            break;
+          case '中2':
+            $profile['shiftTotals'][$emp]['mid2']++;
+            $profile['shiftTotals'][$emp]['total']++;
+            break;
+          case '夜':
+            $profile['shiftTotals'][$emp]['night']++;
+            $profile['shiftTotals'][$emp]['total']++;
+            break;
+          default:
+            break;
+        }
+      }
+    }
+    if ($index === 0) {
+      $lastDay = null;
+      foreach (array_keys($data) as $day) {
+        if ($lastDay === null || strcmp((string)$day, (string)$lastDay) > 0) {
+          $lastDay = $day;
+        }
+      }
+      if ($lastDay !== null) {
+        $assignments = $data[$lastDay] ?? [];
+        if (is_array($assignments)) {
+          foreach ($assignments as $emp => $val) {
+            $profile['lastAssignments'][$emp] = $val;
+          }
+        }
+      }
+    }
+    $profile['periodCount']++;
+    $profile['ranges'][] = [
+      'start' => $row['view_start'] ?? '',
+      'end' => $row['view_end'] ?? '',
+      'id' => isset($row['id']) ? (int)$row['id'] : null,
+    ];
+  }
+
+  return $profile;
+}
+
 // ===== 路由 =====
 $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $path = preg_replace('#^/api#', '', $path) ?: '/';
@@ -95,36 +257,55 @@ switch (true) {
     $team  = (string)($_GET['team']  ?? 'default');
     $start = (string)($_GET['start'] ?? '');
     $end   = (string)($_GET['end']   ?? '');
-    if (!$team || !$start || !$end) send_error('参数缺失', 400);
+    if (!$team) send_error('参数缺失', 400);
 
     $pdo = db();
-    $stmt = $pdo->prepare("
-      SELECT id, employees, data, view_start, view_end
-      FROM schedule_versions
-      WHERE team=? AND view_start=? AND view_end=?
-      ORDER BY id DESC LIMIT 1
-    ");
-    $stmt->execute([$team, $start, $end]);
-    $row = $stmt->fetch();
+    $row = null;
+    if ($start && $end) {
+      $stmt = $pdo->prepare("
+        SELECT id, team, employees, data, view_start, view_end, note, created_at, created_by_name, payload
+        FROM schedule_versions
+        WHERE team=? AND view_start=? AND view_end=?
+        ORDER BY id DESC LIMIT 1
+      ");
+      $stmt->execute([$team, $start, $end]);
+      $row = $stmt->fetch();
+    }
+    if (!$row) {
+      $stmt = $pdo->prepare("
+        SELECT id, team, employees, data, view_start, view_end, note, created_at, created_by_name, payload
+        FROM schedule_versions
+        WHERE team=?
+        ORDER BY id DESC LIMIT 1
+      ");
+      $stmt->execute([$team]);
+      $row = $stmt->fetch();
+    }
 
     if (!$row) {
+      $viewStart = $start ?: date('Y-m-01');
+      $viewEnd = $end ?: date('Y-m-t');
+      $historyProfile = compute_history_profile($pdo, $team, $start ?: null);
       send_json([
         'team'      => $team,
-        'viewStart' => $start,
-        'viewEnd'   => $end,
+        'viewStart' => $viewStart,
+        'viewEnd'   => $viewEnd,
+        'start'     => $viewStart,
+        'end'       => $viewEnd,
         'employees' => [],
         'data'      => (object)[],
-        'version_id'=> null
+        'note'      => '',
+        'created_at'=> null,
+        'created_by_name' => null,
+        'version_id'=> null,
+        'versionId' => null,
+        'historyProfile' => $historyProfile,
       ]);
     } else {
-      send_json([
-        'team'      => $team,
-        'viewStart' => $row['view_start'],
-        'viewEnd'   => $row['view_end'],
-        'employees' => json_decode($row['employees'], true) ?: [],
-        'data'      => json_decode($row['data'], true) ?: (object)[],
-        'version_id'=> (int)$row['id']
-      ]);
+      $result = build_schedule_payload($row, $team);
+      $rangeStart = $start ?: ($row['view_start'] ?? null);
+      $result['historyProfile'] = compute_history_profile($pdo, $team, $rangeStart);
+      send_json($result);
     }
 
   // 保存（新版本）——乐观锁：baseVersionId 不等于最新时返回 409
@@ -157,15 +338,65 @@ switch (true) {
       send_error('保存冲突：已有新版本', 409, ['code'=>409,'latest_version_id'=>$latestId]);
     }
 
+    $snapshot = [
+      'team' => $team,
+      'viewStart' => $vs,
+      'viewEnd' => $ve,
+      'start' => $vs,
+      'end' => $ve,
+      'employees' => array_values($emps),
+      'data' => $data,
+      'note' => $note,
+      'adminDays' => $in['adminDays'] ?? null,
+      'restPrefs' => $in['restPrefs'] ?? null,
+      'nightRules' => $in['nightRules'] ?? null,
+      'nightWindows' => $in['nightWindows'] ?? null,
+      'nightOverride' => $in['nightOverride'] ?? null,
+      'rMin' => $in['rMin'] ?? null,
+      'rMax' => $in['rMax'] ?? null,
+      'pMin' => $in['pMin'] ?? null,
+      'pMax' => $in['pMax'] ?? null,
+      'mixMax' => $in['mixMax'] ?? null,
+      'shiftColors' => $in['shiftColors'] ?? null,
+      'staffingAlerts' => $in['staffingAlerts'] ?? null,
+      'batchChecked' => $in['batchChecked'] ?? null,
+      'albumSelected' => $in['albumSelected'] ?? null,
+      'albumWhiteHour' => $in['albumWhiteHour'] ?? null,
+      'albumMidHour' => $in['albumMidHour'] ?? null,
+      'albumRangeStartMonth' => $in['albumRangeStartMonth'] ?? null,
+      'albumRangeEndMonth' => $in['albumRangeEndMonth'] ?? null,
+      'albumMaxDiff' => $in['albumMaxDiff'] ?? null,
+      'albumAssignments' => $in['albumAssignments'] ?? null,
+      'albumAutoNote' => $in['albumAutoNote'] ?? null,
+      'albumHistory' => $in['albumHistory'] ?? null,
+      'historyProfile' => $in['historyProfile'] ?? null,
+      'operator' => $operator ?: '管理员',
+    ];
+    $snapshotJson = json_encode($snapshot, JSON_UNESCAPED_UNICODE);
+    if ($snapshotJson === false) {
+      $snapshotJson = json_encode($snapshot, JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR) ?: '{}';
+    }
+
+    $employeesJson = json_encode(array_values($emps), JSON_UNESCAPED_UNICODE);
+    if ($employeesJson === false) {
+      $employeesJson = json_encode(array_values($emps), JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR) ?: '[]';
+    }
+    $dataJson = json_encode($data, JSON_UNESCAPED_UNICODE);
+    if ($dataJson === false) {
+      $dataJson = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR) ?: '{}';
+    }
+
     $stmt = $pdo->prepare("
-      INSERT INTO schedule_versions(team, view_start, view_end, employees, data, note, created_by_name)
-      VALUES(?,?,?,?,?,?,?)
+      INSERT INTO schedule_versions(team, view_start, view_end, employees, data, note, created_by_name, payload)
+      VALUES(?,?,?,?,?,?,?,?)
     ");
     $stmt->execute([
       $team, $vs, $ve,
-      json_encode(array_values($emps), JSON_UNESCAPED_UNICODE),
-      json_encode($data, JSON_UNESCAPED_UNICODE),
-      $note, $operator ?: '管理员'
+      $employeesJson,
+      $dataJson,
+      $note,
+      $operator ?: '管理员',
+      $snapshotJson
     ]);
     $newId = (int)$pdo->lastInsertId();
     send_json(['ok'=>true, 'version_id'=>$newId]);
@@ -175,21 +406,43 @@ switch (true) {
     $team  = (string)($_GET['team']  ?? 'default');
     $start = (string)($_GET['start'] ?? '');
     $end   = (string)($_GET['end']   ?? '');
-    if (!$team || !$start || !$end) send_error('参数缺失', 400);
+    if (!$team) send_error('参数缺失', 400);
 
     $pdo = db();
-    $stmt = $pdo->prepare("
-      SELECT id, created_at, note, created_by_name
-      FROM schedule_versions
-      WHERE team=? AND view_start=? AND view_end=?
-      ORDER BY id DESC
-      LIMIT 200
-    ");
-    $stmt->execute([$team, $start, $end]);
+    $start = $start ?: '';
+    $end = $end ?: '';
+    $hasRange = $start !== '' && $end !== '' && strtotime($start) !== false && strtotime($end) !== false;
+    if ($hasRange && $start > $end) {
+      $tmp = $start;
+      $start = $end;
+      $end = $tmp;
+    }
+
+    if ($hasRange) {
+      $stmt = $pdo->prepare("
+        SELECT id, view_start, view_end, created_at, note, created_by_name
+        FROM schedule_versions
+        WHERE team=? AND view_start >= ? AND view_end <= ?
+        ORDER BY created_at DESC, id DESC
+        LIMIT 200
+      ");
+      $stmt->execute([$team, $start, $end]);
+    } else {
+      $stmt = $pdo->prepare("
+        SELECT id, view_start, view_end, created_at, note, created_by_name
+        FROM schedule_versions
+        WHERE team=?
+        ORDER BY created_at DESC, id DESC
+        LIMIT 200
+      ");
+      $stmt->execute([$team]);
+    }
     $rows = $stmt->fetchAll() ?: [];
     send_json(['versions' => array_map(function($r){
       return [
         'id' => (int)$r['id'],
+        'view_start' => $r['view_start'] ?? null,
+        'view_end' => $r['view_end'] ?? null,
         'created_at' => $r['created_at'],
         'note' => $r['note'] ?? '',
         'created_by_name' => $r['created_by_name'] ?? '管理员',
@@ -201,14 +454,27 @@ switch (true) {
     $id = (int)($_GET['id'] ?? 0);
     if ($id <= 0) send_error('参数缺失', 400);
     $pdo = db();
-    $stmt = $pdo->prepare('SELECT employees, data FROM schedule_versions WHERE id = ? LIMIT 1');
+    $stmt = $pdo->prepare('SELECT id, team, employees, data, view_start, view_end, note, created_at, created_by_name, payload FROM schedule_versions WHERE id = ? LIMIT 1');
     $stmt->execute([$id]);
     $row = $stmt->fetch();
     if (!$row) send_error('未找到', 404);
-    send_json([
-      'employees' => json_decode($row['employees'], true) ?: [],
-      'data'      => json_decode($row['data'], true) ?: (object)[],
-    ]);
+    $team = $row['team'] ?? 'default';
+    $result = build_schedule_payload($row, $team);
+    $rangeStart = $result['viewStart'] ?? ($row['view_start'] ?? null);
+    $result['historyProfile'] = compute_history_profile($pdo, $team, $rangeStart);
+    send_json($result);
+
+  // 删除历史版本
+  case $method === 'POST' && $path === '/schedule/version/delete':
+    $in = json_input();
+    $id = (int)($in['id'] ?? 0);
+    $team = trim((string)($in['team'] ?? ''));
+    if ($id <= 0 || $team === '') send_error('参数缺失', 400);
+    $pdo = db();
+    $stmt = $pdo->prepare('DELETE FROM schedule_versions WHERE id = ? AND team = ?');
+    $stmt->execute([$id, $team]);
+    if ($stmt->rowCount() === 0) send_error('记录不存在或已删除', 404);
+    send_json(['ok' => true, 'deleted' => true]);
 
   // 导出：优先 XLSX，失败回退 CSV
   case $method === 'GET' && $path === '/export/xlsx':
