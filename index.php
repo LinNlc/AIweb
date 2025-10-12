@@ -10,8 +10,22 @@ error_reporting(E_ALL);
 date_default_timezone_set('Asia/Shanghai');
 
 // ===== SQLite 连接 & 初始化 =====
-const DB_FILE = __DIR__ . '/data/data.sqlite';
-@mkdir(__DIR__ . '/data', 0770, true);
+$legacyDbFile = '/opt/1panel/apps/openresty/openresty/www/sites/xn--wyuz77ayygl2b/index/api/data/data.sqlite';
+$defaultDbDir = __DIR__ . '/data';
+$defaultDbFile = $defaultDbDir . '/data.sqlite';
+
+$dbFile = $defaultDbFile;
+if (is_file($legacyDbFile)) {
+  $dbFile = $legacyDbFile;
+} elseif (is_dir(dirname($legacyDbFile)) && is_writable(dirname($legacyDbFile))) {
+  $dbFile = $legacyDbFile;
+} else {
+  @mkdir($defaultDbDir, 0770, true);
+}
+
+if (!defined('DB_FILE')) {
+  define('DB_FILE', $dbFile);
+}
 
 function db(): PDO {
   static $pdo = null;
