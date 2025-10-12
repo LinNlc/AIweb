@@ -359,7 +359,8 @@
         albumSelected: {},
         batchChecked: {},
         albumHistory: [],
-        historyProfile: null
+        historyProfile: null,
+        yearlyOptimize: false
       };
     }
     const ORG_STORAGE_KEY = 'scheduler_org_config_v1';
@@ -625,7 +626,7 @@
       }
     }
 
-    function adjustWithHistory({ data, employees, start, end, adminDays, historyProfile, mixMaxRatio=1 }){
+    function adjustWithHistory({ data, employees, start, end, adminDays, historyProfile, mixMaxRatio=1, yearlyOptimize=false }){
       if(!employees.length) return data;
       const days = enumerateDates(start, end);
       if(!days.length) return data;
@@ -646,6 +647,14 @@
             setVal(next, spanStart, emp, '休');
           }
         });
+        if(yearlyOptimize){
+          employees.forEach(emp=>{
+            const prev = lastAssignments[emp];
+            if(prev === '休' && isWork(getVal(next, spanStart, emp))){
+              setVal(next, spanStart, emp, '休');
+            }
+          });
+        }
       }
 
       employees.forEach(emp=>{
@@ -995,6 +1004,45 @@
         });
       };
       useEffect(()=>{ try{ localStorage.setItem(ORG_STORAGE_KEY, JSON.stringify(orgConfig)); }catch{} }, [orgConfig]);
+      const orgConfigLoadedRef = useRef(false);
+      const lastSyncedOrgConfigRef = useRef('');
+      useEffect(()=>{
+        let cancelled = false;
+        (async()=>{
+          try{
+            const res = await apiGet('/org-config');
+            if(cancelled) return;
+            if(res && res.config && typeof res.config === 'object'){
+              const normalized = normalizeOrgConfig(res.config);
+              lastSyncedOrgConfigRef.current = JSON.stringify(normalized);
+              updateOrgConfig(normalized);
+            }
+          }catch(e){
+            console.warn('加载 org 配置失败', e);
+          } finally {
+            if(!cancelled){
+              orgConfigLoadedRef.current = true;
+            }
+          }
+        })();
+        return ()=>{ cancelled = true; };
+      }, []);
+      useEffect(()=>{
+        if(!orgConfigLoadedRef.current) return;
+        const serialized = JSON.stringify(orgConfig);
+        if(serialized === lastSyncedOrgConfigRef.current) return;
+        const timer = setTimeout(()=>{
+          (async()=>{
+            try{
+              await apiPost('/org-config', { config: orgConfig });
+              lastSyncedOrgConfigRef.current = serialized;
+            }catch(e){
+              console.warn('保存 org 配置失败', e);
+            }
+          })();
+        }, 400);
+        return ()=> clearTimeout(timer);
+      }, [orgConfig]);
 
       const [defaultStart, defaultEnd] = useMemo(()=> monthRangeOf(today), []);
       const [teamStateMap, setTeamStateMap] = useState(()=>{
@@ -1090,6 +1138,7 @@
       const [pMin, setPMin] = useState(0.3);
       const [pMax, setPMax] = useState(0.7);
       const [mixMax, setMixMax] = useState(1);
+      const [yearlyOptimize, setYearlyOptimize] = useState(false);
 
       const skipSaveRef = useRef(false);
       const skipLoadRef = useRef(false);
@@ -1122,6 +1171,7 @@
         setPMin(typeof merged.pMin === 'number' ? merged.pMin : 0.3);
         setPMax(typeof merged.pMax === 'number' ? merged.pMax : 0.7);
         setMixMax(typeof merged.mixMax === 'number' ? merged.mixMax : 1);
+        setYearlyOptimize(merged.yearlyOptimize === true);
         setNote(typeof merged.note === 'string' ? merged.note : '');
         setBatchChecked(merged.batchChecked || {});
         setAlbumSelected(merged.albumSelected || {});
@@ -1174,11 +1224,12 @@
           albumAssignments,
           albumAutoNote,
           albumHistory: Array.isArray(albumHistory) ? albumHistory.map(item=> ({ ...item, assignments: item.assignments || {} })) : [],
-          historyProfile
+          historyProfile,
+          yearlyOptimize
         };
         skipLoadRef.current = true;
         setTeamStateMap(prev=> ({ ...prev, [team]: snapshot }));
-      }, [team, start, end, employees, data, versionId, shiftColors, staffingAlerts, adminDays, restPrefs, nightWindows, nightOverride, nightRules, rMin, rMax, pMin, pMax, mixMax, note, batchChecked, albumSelected, albumWhiteHour, albumMidHour, albumRangeStartMonth, albumRangeEndMonth, albumMaxDiff, albumAssignments, albumAutoNote, albumHistory, historyProfile]);
+      }, [team, start, end, employees, data, versionId, shiftColors, staffingAlerts, adminDays, restPrefs, nightWindows, nightOverride, nightRules, rMin, rMax, pMin, pMax, mixMax, note, batchChecked, albumSelected, albumWhiteHour, albumMidHour, albumRangeStartMonth, albumRangeEndMonth, albumMaxDiff, albumAssignments, albumAutoNote, albumHistory, historyProfile, yearlyOptimize]);
 
       const REST_STORE_KEY = 'scheduler_restprefs_store_v2';
       function restStoreKey(team,start,end){ return `${team}__${start}__${end}`; }
@@ -1407,6 +1458,13 @@
       const lastLoadedVersionRef = useRef({});
       const autoLoadedTeamRef = useRef({});
       useEffect(()=>{ lastLoadedVersionRef.current = {}; autoLoadedTeamRef.current = {}; }, [user?.username]);
+      const autoLoadKey = useMemo(()=>{
+        const safeTeam = team || 'default';
+        const safeStart = (start || '').slice(0,10);
+        const safeEnd = (end || '').slice(0,10);
+        const flag = yearlyOptimize ? 'on' : 'off';
+        return `${safeTeam}__${flag}__${safeStart}__${safeEnd}`;
+      }, [team, start, end, yearlyOptimize]);
       function applyServerState(payload){
         if(!payload || typeof payload !== 'object') return;
         const get = (...keys)=>{
@@ -1492,11 +1550,28 @@
         }
         const historyPayload = get('historyProfile','history_profile');
         if(historyPayload){ setHistoryProfile(historyPayload); }
+        const yearlyOptimizePayload = get('yearlyOptimize','year_optimize');
+        if(yearlyOptimizePayload !== undefined){
+          const enabled = yearlyOptimizePayload === true || yearlyOptimizePayload === 1 || yearlyOptimizePayload === '1';
+          setYearlyOptimize(enabled);
+        }
         tryRestoreRestForView();
       }
       async function loadFromServer(){
         try {
-          const res = await apiGet(`/schedule?team=${encodeURIComponent(team)}&start=${start}&end=${end}`);
+          const params = new URLSearchParams();
+          if(team) params.set('team', team);
+          if(start) params.set('start', start);
+          if(end) params.set('end', end);
+          if(yearlyOptimize){
+            const yrMatch = (start || '').match(/^(\d{4})/);
+            if(yrMatch){
+              params.set('historyYearStart', `${yrMatch[1]}-01-01`);
+              params.set('yearOptimize', '1');
+            }
+          }
+          const query = params.toString();
+          const res = await apiGet(`/schedule?${query}`);
           applyServerState({ ...res, versionId: res.version_id || res.versionId });
           const latestVersion = res.version_id || res.versionId;
           if(latestVersion){
@@ -1543,7 +1618,8 @@
             albumAssignments,
             albumAutoNote,
             albumHistory,
-            historyProfile
+            historyProfile,
+            yearlyOptimize
           };
           const res = await apiPost('/schedule/save', payload);
           applyServerState({ ...payload, versionId: res.version_id || res.versionId || versionId });
@@ -1633,10 +1709,11 @@
       useEffect(()=>{
         if(!user) return;
         if(!team) return;
-        if(autoLoadedTeamRef.current[team]) return;
-        autoLoadedTeamRef.current[team] = true;
+        const key = autoLoadKey;
+        if(autoLoadedTeamRef.current[key]) return;
+        autoLoadedTeamRef.current[key] = true;
         loadFromServer();
-      }, [team, user]);
+      }, [autoLoadKey, team, user]);
       async function doLogout(){ try{ await apiPost('/logout',{}); setUser(null);}catch{} }
       function exportExcel(){ const url = `${API_BASE}/export/xlsx?team=${encodeURIComponent(team)}&start=${start}&end=${end}`; window.location.href=url; }
 
@@ -1856,7 +1933,7 @@
           setData(cur); await new Promise(r=>setTimeout(r, 20));
 
           setStage('阶段 5/6：参考历史与行政天数调整', 92, 100);
-          cur = adjustWithHistory({ data: cur, employees: prioritizedTargets, start, end, adminDays, historyProfile, mixMaxRatio: mixMax });
+          cur = adjustWithHistory({ data: cur, employees: prioritizedTargets, start, end, adminDays, historyProfile, mixMaxRatio: mixMax, yearlyOptimize });
           setData(cur); await new Promise(r=>setTimeout(r, 20));
 
           setStage('阶段 6/6：校验并微调', 98, 100);
@@ -3097,6 +3174,10 @@
           )}
         </Section>
       );
+      const scheduleYearLabel = (()=>{
+        const rawYear = (start || '').slice(0,4);
+        return /^\d{4}$/.test(rawYear) ? rawYear : String(today.getFullYear());
+      })();
       const ViewSettings = (
         <Section title="设置 / 导出">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -3111,6 +3192,17 @@
               <PillBtn onClick={saveToServer} color="emerald" disabled={editingLocked} title={editingLocked?'执行中：只读':''}>保存新版本</PillBtn>
               <PillBtn onClick={exportExcel} color="sky" disabled={editingLocked} title={editingLocked?'执行中：只读':''}>服务器导出 Excel/CSV</PillBtn>
             </div>
+          </div>
+          <div className="mt-6">
+            <h3 className="font-semibold mb-2">自动排班优化</h3>
+            <label className={`flex items-start gap-3 text-sm ${editingLocked?'opacity-60':''}`}>
+              <input type="checkbox" className="mt-1" checked={yearlyOptimize} disabled={editingLocked}
+                onChange={e=> setYearlyOptimize(e.target.checked)} />
+              <span>
+                <span className="font-medium text-gray-700">按当年累计班次优化</span>
+                <span className="block text-xs text-gray-500 mt-1">开启后，自动排班会参考 {scheduleYearLabel} 年 1 月至排班开始日前的历史安排，延续休息日并均衡全年班次占比。</span>
+              </span>
+            </label>
           </div>
           <div className="mt-6">
             <h3 className="font-semibold mb-2">班次颜色（同步保存到浏览器）</h3>
