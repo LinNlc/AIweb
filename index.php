@@ -361,6 +361,18 @@ switch (true) {
     $team = $row['team'] ?? 'default';
     send_json(build_schedule_payload($row, $team));
 
+  // 删除历史版本
+  case $method === 'POST' && $path === '/schedule/version/delete':
+    $in = json_input();
+    $id = (int)($in['id'] ?? 0);
+    $team = trim((string)($in['team'] ?? ''));
+    if ($id <= 0 || $team === '') send_error('参数缺失', 400);
+    $pdo = db();
+    $stmt = $pdo->prepare('DELETE FROM schedule_versions WHERE id = ? AND team = ?');
+    $stmt->execute([$id, $team]);
+    if ($stmt->rowCount() === 0) send_error('记录不存在或已删除', 404);
+    send_json(['ok' => true, 'deleted' => true]);
+
   // 导出：优先 XLSX，失败回退 CSV
   case $method === 'GET' && $path === '/export/xlsx':
     $team  = (string)($_GET['team']  ?? 'default');
