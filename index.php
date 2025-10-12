@@ -309,12 +309,21 @@ switch (true) {
     if (!$team) send_error('参数缺失', 400);
 
     $pdo = db();
-    if ($start && $end) {
+    $start = $start ?: '';
+    $end = $end ?: '';
+    $hasRange = $start !== '' && $end !== '' && strtotime($start) !== false && strtotime($end) !== false;
+    if ($hasRange && $start > $end) {
+      $tmp = $start;
+      $start = $end;
+      $end = $tmp;
+    }
+
+    if ($hasRange) {
       $stmt = $pdo->prepare("
         SELECT id, view_start, view_end, created_at, note, created_by_name
         FROM schedule_versions
-        WHERE team=? AND view_start=? AND view_end=?
-        ORDER BY id DESC
+        WHERE team=? AND view_start >= ? AND view_end <= ?
+        ORDER BY created_at DESC, id DESC
         LIMIT 200
       ");
       $stmt->execute([$team, $start, $end]);
@@ -323,7 +332,7 @@ switch (true) {
         SELECT id, view_start, view_end, created_at, note, created_by_name
         FROM schedule_versions
         WHERE team=?
-        ORDER BY id DESC
+        ORDER BY created_at DESC, id DESC
         LIMIT 200
       ");
       $stmt->execute([$team]);
