@@ -48,6 +48,12 @@
 
     const Icon = ({name, className=''}) => { const common = "w-5 h-5"; switch(name){ case 'grid': return <svg className={common+" "+className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 9h8V3H3v6zm10 12h8v-6h-8v6zM3 21h8v-6H3v6zm10-12h8V3h-8v6z" strokeWidth="1.5"/></svg>; case 'users': return <svg className={common+" "+className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M16 11c1.66 0 3-1.57 3-3.5S17.66 4 16 4s-3 1.57-3 3.5S14.34 11 16 11zM8 11c1.66 0 3-1.57 3-3.5S9.66 4 8 4 5 5.57 5 7.5 6.34 11 8 11zM8 13c-2.67 0-8 1.34-8 4v3h10v-3c0-1.1.9-2 2-2h4c.74 0 1.4.4 1.74 1" strokeWidth="1.5"/></svg>; case 'magic': return <svg className={common+" "+className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 21l9-9M14 7l3-3M11 10l3-3" strokeWidth="1.5"/></svg>; case 'chart': return <svg className={common+" "+className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 3v18h18M7 13v5M12 9v9M17 6v12" strokeWidth="1.5"/></svg>; case 'history': return <svg className={common+" "+className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 8v5l3 3M3 12a9 9 0 1 0 9-9 9 9 0 0 0-9 9zm0 0h3" strokeWidth="1.5"/></svg>; case 'cog': return <svg className={common+" "+className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 15.5A3.5 3.5 0 1 0 12 8.5a3.5 3.5 0 0 0 0 7z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V22a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1 1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a2 2 0 0 1-1.82.33 1.65 1.65 0 0 0-1.51 1H2a2 2 0 0 1 0-4h.09c-.49.2-.95.52-1.15 1z" strokeWidth="1"/></svg>; case 'lock': return <svg className={common+" "+className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>; default: return null; } };
 
+    const Spinner = ({ className = 'w-4 h-4 text-white' }) => (
+      <svg className={`animate-spin ${className}`} viewBox="0 0 24 24" fill="none">
+        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+        <path className="opacity-75" d="M4 12a8 8 0 0 1 8-8v4a4 4 0 0 0-4 4H4z" fill="currentColor"></path>
+      </svg>
+    );
     const colorClasses = { indigo: 'bg-indigo-600 hover:bg-indigo-500', emerald: 'bg-emerald-600 hover:bg-emerald-500', sky: 'bg-sky-600 hover:bg-sky-500', gray: 'bg-gray-800 hover:bg-gray-700' };
     const PillBtn = ({children, onClick, color='indigo', type='button', disabled=false, title=''}) => (
       <button type={type} disabled={disabled} onClick={onClick} title={title} className={`group relative overflow-hidden inline-flex items-center justify-center gap-2 rounded-full px-4 py-2 text-white ${disabled?'bg-gray-300 cursor-not-allowed':(colorClasses[color] || colorClasses.indigo)} transition-transform duration-200 ${disabled?'':'hover:-translate-y-0.5 active:translate-y-0'} shadow-md`}>
@@ -124,6 +130,11 @@
     const REST_PAIRS = ['12','23','34','56','71'];
     const MENU_KEYS = ['grid','batch','album','users','stats','history','settings','roles'];
     const defaultShiftColors = { '白':'#eef2ff','中1':'#e0f2fe','中2':'#cffafe','夜':'#fee2e2','休':'#f3f4f6' };
+    const defaultStaffingAlerts = {
+      total: { threshold: 0, lowColor: '#fee2e2', highColor: '#dcfce7' },
+      white: { threshold: 0, lowColor: '#fef3c7', highColor: '#bfdbfe' },
+      mid1: { threshold: 0, lowColor: '#fef3c7', highColor: '#bae6fd' }
+    };
     const normalizeRestPair = (pair)=> pair==='17' ? '71' : pair;
     function sanitizeRestPairValue(val){
       if(!val) return '';
@@ -139,6 +150,42 @@
         if(cleaned) next[emp] = cleaned;
       });
       return next;
+    }
+    function normalizeStaffingAlerts(raw){
+      const base = JSON.parse(JSON.stringify(defaultStaffingAlerts));
+      if(!raw || typeof raw !== 'object') return base;
+      ['total','white','mid1'].forEach(key=>{
+        const entry = raw[key];
+        if(!entry || typeof entry !== 'object') return;
+        const threshold = Number(entry.threshold);
+        if(Number.isFinite(threshold)) base[key].threshold = threshold;
+        if(typeof entry.lowColor === 'string' && entry.lowColor.trim()) base[key].lowColor = entry.lowColor;
+        if(typeof entry.highColor === 'string' && entry.highColor.trim()) base[key].highColor = entry.highColor;
+      });
+      return base;
+    }
+    function contrastColor(hex){
+      if(typeof hex !== 'string') return '#111827';
+      const norm = hex.replace('#','');
+      if(norm.length !== 6) return '#111827';
+      const r = parseInt(norm.slice(0,2),16);
+      const g = parseInt(norm.slice(2,4),16);
+      const b = parseInt(norm.slice(4,6),16);
+      if([r,g,b].some(v=> Number.isNaN(v))) return '#111827';
+      const luminance = (0.299*r + 0.587*g + 0.114*b) / 255;
+      return luminance > 0.6 ? '#111827' : '#f9fafb';
+    }
+    function styleForStaffing(count, rule){
+      if(!rule) return {};
+      const { threshold, lowColor, highColor } = rule;
+      const targetColor = (Number.isFinite(threshold) && count <= threshold) ? lowColor : highColor;
+      if(!targetColor) return {};
+      return {
+        backgroundColor: targetColor,
+        color: contrastColor(targetColor),
+        borderRadius: '999px',
+        padding: '0 0.35rem'
+      };
     }
     function normalizeNightRules(raw){
       const defaults = {
@@ -290,6 +337,7 @@
         data: {},
         versionId: null,
         shiftColors: { ...defaultShiftColors },
+        staffingAlerts: normalizeStaffingAlerts(),
         adminDays: 0,
         restPrefs: {},
         nightWindows: [{ s: rangeStart, e: rangeEnd }],
@@ -310,7 +358,8 @@
         albumAutoNote: '',
         albumSelected: {},
         batchChecked: {},
-        albumHistory: []
+        albumHistory: [],
+        historyProfile: null
       };
     }
     const ORG_STORAGE_KEY = 'scheduler_org_config_v1';
@@ -442,6 +491,7 @@
 
     function clampPersonByRange({employees, data, start, end, pMin=0.3, pMax=0.7, maxRounds=240, mixMaxRatio=1}){
       let cur = JSON.parse(JSON.stringify(data));
+      const days = enumerateDates(start, end);
       for(let round=0; round<maxRounds; round++){
         let changed=false;
         for(const e of employees){
@@ -451,13 +501,13 @@
           const low = Math.ceil(pMin * Math.max(1,W));
           const high = Math.floor(pMax * Math.max(1,W));
           if(M > high){
-            for(const d of enumerateDates(start,end)){
+            for(const d of days){
               if(isLeftEdgeMid(cur, d, e)){
                 if(trySetVal(cur, d, e, '白', {start,end,mixMaxRatio})) { changed=true; break; }
               }
             }
           } else if (M < low){
-            for(const d of enumerateDates(start,end)){
+            for(const d of days){
               if(isRightEdgeWhite(cur, d, e)){
                 if(trySetVal(cur, d, e, '中1', {start,end,mixMaxRatio})) { changed=true; break; }
               }
@@ -467,6 +517,167 @@
         if(!changed) break;
       }
       return repairNoMidToWhite({ data: cur, employees, start, end });
+    }
+
+    function statsForEmployee(data, emp, start, end){
+      let white=0, mid=0, mid2=0, night=0, total=0;
+      for(const day of enumerateDates(start, end)){
+        const v = getVal(data, day, emp);
+        if(!v || v==='休') continue;
+        total++;
+        if(v==='白') white++;
+        else if(v==='中1') mid++;
+        else if(v==='中2') mid2++;
+        else if(v==='夜') night++;
+      }
+      return { white, mid, mid2, night, total };
+    }
+
+    function sortedByHistory(employees, historyProfile){
+      const totals = historyProfile?.shiftTotals || historyProfile?.shift_totals || {};
+      return employees.slice().sort((a,b)=>{
+        const ta = totals[a]?.total ?? totals[a]?.总 ?? 0;
+        const tb = totals[b]?.total ?? totals[b]?.总 ?? 0;
+        if(ta !== tb) return ta - tb;
+        const wa = totals[a]?.white ?? totals[a]?.白 ?? 0;
+        const wb = totals[b]?.white ?? totals[b]?.白 ?? 0;
+        if(wa !== wb) return wa - wb;
+        return a.localeCompare(b,'zh-CN');
+      });
+    }
+
+    function adjustEmployeeSchedule({ next, emp, days, spanStart, spanEnd, targetWhite, targetMid, targetTotal, mixMaxRatio }){
+      const count = ()=>{
+        let white=0, mid=0, total=0;
+        for(const day of days){
+          const v = getVal(next, day, emp);
+          if(!v || v==='休') continue;
+          total++;
+          if(v==='白') white++;
+          else if(v==='中1') mid++;
+        }
+        return { white, mid, total };
+      };
+      const tryConvert = (from, to)=>{
+        for(const day of days){
+          const v = getVal(next, day, emp);
+          if(v !== from) continue;
+          if(to === '休'){
+            const row = { ...(next[day]||{}) };
+            row[emp] = '休';
+            next[day] = row;
+            return true;
+          }
+          if(to === '白' || to === '中1'){
+            if(trySetVal(next, day, emp, to, { start: spanStart, end: spanEnd, mixMaxRatio })){
+              return true;
+            }
+          }
+        }
+        return false;
+      };
+      let guard = days.length * 8;
+      let cur = count();
+      while(cur.mid > targetMid && guard-- > 0){
+        if(cur.white < targetWhite){
+          if(!tryConvert('中1','白')) break;
+        } else if(!tryConvert('中1','休')){
+          break;
+        }
+        cur = count();
+      }
+      guard = days.length * 8;
+      while(cur.mid < targetMid && guard-- > 0){
+        if(!tryConvert('白','中1')){
+          if(!tryConvert('休','中1')) break;
+        }
+        cur = count();
+      }
+      guard = days.length * 8;
+      while(cur.white > targetWhite && guard-- > 0){
+        if(!tryConvert('白','休')) break;
+        cur = count();
+      }
+      guard = days.length * 8;
+      while(cur.white < targetWhite && guard-- > 0){
+        if(!tryConvert('休','白')){
+          if(!tryConvert('中1','白')) break;
+        }
+        cur = count();
+      }
+      guard = days.length * 8;
+      while(cur.total > targetTotal && guard-- > 0){
+        if(!tryConvert('白','休')){
+          if(!tryConvert('中1','休')) break;
+        }
+        cur = count();
+      }
+      guard = days.length * 8;
+      while(cur.total < targetTotal && guard-- > 0){
+        if(cur.white < targetWhite){
+          if(!tryConvert('休','白')){
+            if(!tryConvert('中1','白')) break;
+          }
+        } else {
+          if(!tryConvert('休','中1') && !tryConvert('白','中1')) break;
+        }
+        cur = count();
+      }
+    }
+
+    function adjustWithHistory({ data, employees, start, end, adminDays, historyProfile, mixMaxRatio=1 }){
+      if(!employees.length) return data;
+      const days = enumerateDates(start, end);
+      if(!days.length) return data;
+      const next = JSON.parse(JSON.stringify(data));
+      const totals = historyProfile?.shiftTotals || historyProfile?.shift_totals || {};
+      const lastAssignments = historyProfile?.lastAssignments || historyProfile?.last_assignments || {};
+      const spanStart = days[0];
+      const spanEnd = days[days.length-1];
+
+      if(lastAssignments && spanStart){
+        employees.forEach(emp=>{
+          const prev = lastAssignments[emp];
+          if(!prev) return;
+          if((prev==='夜' || prev==='中2') && isWork(getVal(next, spanStart, emp))){
+            setVal(next, spanStart, emp, '休');
+          }
+          if(prev==='中1' && getVal(next, spanStart, emp)==='白'){
+            setVal(next, spanStart, emp, '休');
+          }
+        });
+      }
+
+      employees.forEach(emp=>{
+        const stats = statsForEmployee(next, emp, start, end);
+        const totalDays = days.length;
+        const targetTotal = (Number.isFinite(adminDays) && adminDays>0) ? Math.min(adminDays, totalDays) : stats.total;
+        const hist = totals[emp] || {};
+        const histTotal = hist.total ?? hist.总 ?? ((hist.white||hist.白||0)+(hist.mid||hist.中1||0)+(hist.mid2||hist.中2||0)+(hist.night||hist.夜||0));
+        let whiteShare = histTotal>0 ? (hist.white ?? hist.白 ?? 0)/histTotal : (stats.total? stats.white/Math.max(1,stats.total) : 0.6);
+        let midShare = histTotal>0 ? (hist.mid ?? hist.中1 ?? 0)/histTotal : (stats.total? stats.mid/Math.max(1,stats.total) : 0.4);
+        if(!Number.isFinite(whiteShare) || whiteShare<0) whiteShare = 0;
+        if(!Number.isFinite(midShare) || midShare<0) midShare = 0;
+        if(whiteShare + midShare > 1){
+          const sum = whiteShare + midShare;
+          whiteShare /= sum;
+          midShare /= sum;
+        }
+        let targetWhite = Math.round(targetTotal * whiteShare);
+        let targetMid = Math.round(targetTotal * midShare);
+        if(targetWhite + targetMid > targetTotal){
+          const overflow = targetWhite + targetMid - targetTotal;
+          if(targetMid >= overflow){
+            targetMid -= overflow;
+          } else {
+            targetWhite = Math.max(0, targetWhite - (overflow - targetMid));
+            targetMid = 0;
+          }
+        }
+        adjustEmployeeSchedule({ next, emp, days, spanStart, spanEnd, targetWhite, targetMid, targetTotal, mixMaxRatio });
+      });
+
+      return next;
     }
 
     function autoAssignNightAndM2({employees, data, start, end, override=false, nightRules, restPrefs={}}){
@@ -657,6 +868,7 @@
       const [username, setUsername] = useState('admin');
       const [password, setPassword] = useState('admin');
       const [err, setErr] = useState('');
+      const [loading, setLoading] = useState(false);
       async function doLogin(e){
         e.preventDefault();
         setErr('');
@@ -670,10 +882,13 @@
           return;
         }
         try{
+          setLoading(true);
           const res = await apiPost('/login', { username, password });
           onSuccess(res.user);
         } catch(ex){
           setErr(ex.message||'登录失败');
+        } finally {
+          setLoading(false);
         }
       }
       return (
@@ -684,6 +899,7 @@
               <div>
                 <label className="block text-sm text-gray-600 mb-1">用户名</label>
                 <input className="w-full border rounded px-3 py-2" value={username}
+                  disabled={loading}
                   onCompositionStart={()=>{}}
                   onCompositionEnd={(e)=>setUsername(e.target.value)}
                   onChange={e=>setUsername(e.target.value)} />
@@ -691,16 +907,74 @@
               <div>
                 <label className="block text-sm text-gray-600 mb-1">密码</label>
                 <input type="password" className="w-full border rounded px-3 py-2" value={password}
+                  disabled={loading}
                   onCompositionStart={()=>{}}
                   onCompositionEnd={(e)=>setPassword(e.target.value)}
                   onChange={e=>setPassword(e.target.value)} />
               </div>
               {err && <div className="text-sm text-red-600">{err}</div>}
-              <button type="submit" className="w-full rounded-full bg-indigo-600 hover:bg-indigo-500 text-white py-2 transition">登录</button>
+              <button type="submit" disabled={loading} className={`w-full rounded-full text-white py-2 transition flex items-center justify-center gap-2 ${loading?'bg-indigo-400 cursor-not-allowed':'bg-indigo-600 hover:bg-indigo-500'}`}>
+                {loading && <Spinner className="w-4 h-4 text-white" />}
+                <span>登录</span>
+              </button>
             </div>
           </form>
         </div>
       );
+
+
+    function MonthInput({ value, onChange, disabled=false, className='', placeholder='YYYY-MM' }){
+      const [draft, setDraft] = useState(()=> value || '');
+      useEffect(()=>{ setDraft(value || ''); }, [value]);
+      const format = (raw)=>{
+        const digits = String(raw||'').replace(/[^0-9]/g,'');
+        let next = digits.slice(0,4);
+        if(digits.length > 4){
+          next += '-' + digits.slice(4,6);
+        }
+        return next;
+      };
+      const commit = (input)=>{
+        if(!onChange) return;
+        if(!input){ onChange(''); return; }
+        const match = input.match(/^(\d{4})(?:-(\d{1,2}))?$/);
+        if(!match){ onChange(value || ''); return; }
+        const year = match[1];
+        const monthRaw = match[2] ?? '';
+        const monthNum = monthRaw ? parseInt(monthRaw, 10) : NaN;
+        const month = Number.isFinite(monthNum) ? Math.min(12, Math.max(1, monthNum)) : 1;
+        const normalized = `${year}-${String(month).padStart(2,'0')}`;
+        onChange(normalized);
+        setDraft(normalized);
+      };
+      const handleChange = (e)=>{
+        if(disabled) return;
+        const formatted = format(e.target.value);
+        setDraft(formatted);
+        if(formatted.length >= 7){
+          commit(formatted);
+        } else if(formatted === ''){
+          if(onChange) onChange('');
+        }
+      };
+      const handleBlur = ()=>{
+        if(disabled) return;
+        if(!draft){
+          if(onChange) onChange('');
+          return;
+        }
+        commit(draft);
+      };
+      return (
+        <input type="text" inputMode="numeric" pattern="\d{4}-\d{2}" className={className}
+          value={draft}
+          placeholder={placeholder}
+          disabled={disabled}
+          onChange={handleChange}
+          onBlur={handleBlur}
+        />
+      );
+    }
     }
 
     function App(){
@@ -762,6 +1036,21 @@
       const [data, setData] = useState({});
       const [versionId, setVersionId] = useState(null);
       const [versions, setVersions]   = useState([]);
+      const [versionsLoading, setVersionsLoading] = useState(false);
+      const [versionDeletingId, setVersionDeletingId] = useState(null);
+      const [toast, setToast] = useState(null);
+      const toastTimerRef = useRef(null);
+      useEffect(()=>{
+        return ()=>{
+          if(toastTimerRef.current) clearTimeout(toastTimerRef.current);
+        };
+      }, []);
+      const showToast = (message, type = 'info', duration = 2600) => {
+        if(!message) return;
+        if(toastTimerRef.current) clearTimeout(toastTimerRef.current);
+        setToast({ message, type });
+        toastTimerRef.current = setTimeout(()=> setToast(null), duration);
+      };
 
       const [prog, setProg] = useState({ running:false, stage:'', done:0, total:100 });
       const [logs, setLogs] = useState([]);
@@ -788,11 +1077,14 @@
       const [accountPasswordDrafts, setAccountPasswordDrafts] = useState({});
 
       const [shiftColors, setShiftColors] = useState({ ...defaultShiftColors });
+      const [staffingAlerts, setStaffingAlerts] = useState(()=> normalizeStaffingAlerts());
       const [adminDays, setAdminDays] = useState(0);
       const [restPrefs, setRestPrefs] = useState({});
       const [nightWindows, setNightWindows] = useState([{ s: defaultStart, e: defaultEnd }]);
       const [nightOverride, setNightOverride] = useState(true);
       const [nightRules, setNightRules] = useState(()=> normalizeNightRules());
+
+      const [historyProfile, setHistoryProfile] = useState(null);
 
       const [rMin, setRMin] = useState(0.3);
       const [rMax, setRMax] = useState(0.7);
@@ -819,6 +1111,7 @@
         setData(merged.data || {});
         setVersionId(merged.versionId || null);
         setShiftColors(merged.shiftColors ? { ...defaultShiftColors, ...merged.shiftColors } : { ...defaultShiftColors });
+        setStaffingAlerts(normalizeStaffingAlerts(merged.staffingAlerts));
         setAdminDays(Number(merged.adminDays||0));
         setRestPrefs(sanitizeRestPrefsMap(merged.restPrefs||{}));
         const wins = Array.isArray(merged.nightWindows) && merged.nightWindows.length ? merged.nightWindows : [{ s: merged.start || defaultStart, e: merged.end || defaultEnd }];
@@ -843,6 +1136,7 @@
         setAlbumAssignments(merged.albumAssignments || {});
         setAlbumAutoNote(typeof merged.albumAutoNote === 'string' ? merged.albumAutoNote : '');
         setAlbumHistory(Array.isArray(merged.albumHistory) ? merged.albumHistory.map(item=> ({ ...item, assignments: item.assignments || {} })) : []);
+        setHistoryProfile(merged.historyProfile || null);
         initializedRef.current = true;
       }, [team, teamStateMap, defaultStart, defaultEnd]);
 
@@ -859,6 +1153,7 @@
           data,
           versionId,
           shiftColors,
+          staffingAlerts,
           adminDays,
           restPrefs: sanitizeRestPrefsMap(restPrefs),
           nightWindows,
@@ -879,11 +1174,12 @@
           albumMaxDiff,
           albumAssignments,
           albumAutoNote,
-          albumHistory: Array.isArray(albumHistory) ? albumHistory.map(item=> ({ ...item, assignments: item.assignments || {} })) : []
+          albumHistory: Array.isArray(albumHistory) ? albumHistory.map(item=> ({ ...item, assignments: item.assignments || {} })) : [],
+          historyProfile
         };
         skipLoadRef.current = true;
         setTeamStateMap(prev=> ({ ...prev, [team]: snapshot }));
-      }, [team, start, end, employees, data, versionId, shiftColors, adminDays, restPrefs, nightWindows, nightOverride, nightRules, rMin, rMax, pMin, pMax, mixMax, note, batchChecked, albumSelected, albumWhiteHour, albumMidHour, albumRangeStartMonth, albumRangeEndMonth, albumMaxDiff, albumAssignments, albumAutoNote, albumHistory]);
+      }, [team, start, end, employees, data, versionId, shiftColors, staffingAlerts, adminDays, restPrefs, nightWindows, nightOverride, nightRules, rMin, rMax, pMin, pMax, mixMax, note, batchChecked, albumSelected, albumWhiteHour, albumMidHour, albumRangeStartMonth, albumRangeEndMonth, albumMaxDiff, albumAssignments, albumAutoNote, albumHistory, historyProfile]);
 
       const REST_STORE_KEY = 'scheduler_restprefs_store_v2';
       function restStoreKey(team,start,end){ return `${team}__${start}__${end}`; }
@@ -1151,6 +1447,10 @@
         if(shiftPayload && typeof shiftPayload === 'object'){
           setShiftColors(prev=> ({ ...defaultShiftColors, ...prev, ...shiftPayload }));
         }
+        const staffingPayload = get('staffingAlerts','staffing_alerts');
+        if(staffingPayload){
+          setStaffingAlerts(normalizeStaffingAlerts(staffingPayload));
+        }
         const notePayload = get('note','remark');
         if(typeof notePayload === 'string'){ setNote(notePayload); }
         const rMinPayload = get('rMin','r_min');
@@ -1191,6 +1491,8 @@
         if(Array.isArray(albumHistoryPayload)){
           setAlbumHistory(albumHistoryPayload.map(item=> ({ ...item, assignments: item?.assignments || {} })));
         }
+        const historyPayload = get('historyProfile','history_profile');
+        if(historyPayload){ setHistoryProfile(historyPayload); }
         tryRestoreRestForView();
       }
       async function loadFromServer(){
@@ -1231,6 +1533,7 @@
             pMax,
             mixMax,
             shiftColors,
+            staffingAlerts,
             batchChecked,
             albumSelected,
             albumWhiteHour,
@@ -1240,12 +1543,17 @@
             albumMaxDiff,
             albumAssignments,
             albumAutoNote,
-            albumHistory
+            albumHistory,
+            historyProfile
           };
           const res = await apiPost('/schedule/save', payload);
           applyServerState({ ...payload, versionId: res.version_id || res.versionId || versionId });
           if(res && (res.version_id || res.versionId)){
             lastLoadedVersionRef.current[team] = res.version_id || res.versionId;
+          }
+          showToast('已保存新版本', 'success');
+          if(tab === 'history'){
+            loadVersions();
           }
         } catch(e){
           if(e.payload && e.payload.code===409){
@@ -1256,12 +1564,13 @@
         }
       }
       async function loadVersions(){
+        const trimmedTeam = (team || '').trim();
+        if(!trimmedTeam){
+          globalErr('请选择团队后再刷新历史版本');
+          return;
+        }
+        setVersionsLoading(true);
         try{
-          const trimmedTeam = (team || '').trim();
-          if(!trimmedTeam){
-            globalErr('请选择团队后再刷新历史版本');
-            return;
-          }
           const params = new URLSearchParams();
           params.set('team', trimmedTeam);
           params.set('start', '1970-01-01');
@@ -1284,6 +1593,8 @@
           }
         } catch(e){
           globalErr(e.message);
+        } finally {
+          setVersionsLoading(false);
         }
       }
       async function loadVersionById(id, options={}){
@@ -1295,6 +1606,29 @@
           if(!options?.silent){
             globalErr(e.message);
           }
+        }
+      }
+      async function deleteVersionById(id){
+        if(!id) return;
+        if(!confirm('确定删除该历史版本吗？删除后无法恢复。')) return;
+        const trimmedTeam = (team || '').trim();
+        if(!trimmedTeam){
+          globalErr('请选择团队后再操作');
+          return;
+        }
+        setVersionDeletingId(id);
+        try{
+          await apiPost('/schedule/version/delete', { id, team: trimmedTeam });
+          setVersions(prev=> prev.filter(v=> v.id !== id));
+          if(lastLoadedVersionRef.current[trimmedTeam] === id){
+            delete lastLoadedVersionRef.current[trimmedTeam];
+          }
+          showToast('已删除历史版本', 'success');
+          await loadVersions();
+        } catch(e){
+          globalErr(e.message);
+        } finally {
+          setVersionDeletingId(null);
         }
       }
       useEffect(()=>{
@@ -1376,7 +1710,18 @@
                         <tr key={d} className={"border-t hover:bg-indigo-50/30 "+(weekend? 'bg-gray-50' : '')}>
                           <td className={`py-1.5 px-3 font-medium text-gray-800 left-sticky`} style={{minWidth:'8.5rem'}}>
                             <div className="flex items-center gap-2"><span>{d}</span></div>
-                            <div className="text-xs text-gray-500">在岗 {stat['总']}（白 {stat['白']} / 中1 {stat['中1']} / 中2 {stat['中2']} / 夜 {stat['夜']}）</div>
+                            <div className="text-xs text-gray-500 flex flex-wrap items-center gap-1">
+                              <span style={styleForStaffing(stat['总'], staffingAlerts.total)}>在岗 {stat['总']}</span>
+                              <span>（</span>
+                              <span style={styleForStaffing(stat['白'], staffingAlerts.white)}>白 {stat['白']}</span>
+                              <span>/</span>
+                              <span style={styleForStaffing(stat['中1'], staffingAlerts.mid1)}>中1 {stat['中1']}</span>
+                              <span>/</span>
+                              <span>中2 {stat['中2']}</span>
+                              <span>/</span>
+                              <span>夜 {stat['夜']}</span>
+                              <span>）</span>
+                            </div>
                           </td>
                           <td className="py-1.5 px-3 text-gray-500 left-sticky-2" style={{minWidth:'6.5rem'}}>周{WN[w]}</td>
                           <td className="py-1.5 px-3 left-sticky-3" style={{minWidth:'9rem'}}>
@@ -1422,7 +1767,7 @@
         const [kw, setKw] = useState('');
         const filtered = useMemo(()=>{ const k = kw.trim().toLowerCase(); return k ? employees.filter(e=> e.toLowerCase().includes(k)) : employees; }, [kw, employees]);
         const listRef = useRef(null);
-        const withStay = (cb)=>{ const el=listRef.current; const st=el?el.scrollTop:0; cb(); requestAnimationFrame(()=>{ if(el) el.scrollTop = st; }); };
+        const withStay = (cb)=>{ const el=listRef.current; const st=el?el.scrollTop:0; const sl=el?el.scrollLeft:0; cb(); requestAnimationFrame(()=>{ const node=listRef.current; if(node){ node.scrollTop = st; node.scrollLeft = sl; } }); };
         const selectedCount = filtered.filter(n=> !!batchChecked[n]).length;
         const allSelected = filtered.length>0 && selectedCount===filtered.length;
         return (
@@ -1452,7 +1797,7 @@
         const [kw, setKw] = useState('');
         const filtered = useMemo(()=>{ const k = kw.trim().toLowerCase(); return k? employees.filter(e=> e.toLowerCase().includes(k)) : employees; }, [kw, employees]);
         const listRef = useRef(null);
-        const withStay = (cb)=>{ const el=listRef.current; const st=el?el.scrollTop:0; cb(); requestAnimationFrame(()=>{ if(el) el.scrollTop = st; }); };
+        const withStay = (cb)=>{ const el=listRef.current; const st=el?el.scrollTop:0; const sl=el?el.scrollLeft:0; cb(); requestAnimationFrame(()=>{ const node=listRef.current; if(node){ node.scrollTop = st; node.scrollLeft = sl; } }); };
         const selectedCount = filtered.filter(name=> !!albumSelected[name]).length;
         return (
           <div className="rounded-2xl border bg-gradient-to-br from-white via-white to-indigo-50/40 p-3">
@@ -1489,28 +1834,34 @@
           const targets = checkedList.length? checkedList : employees;
           if(targets.length===0){ alert('请先勾选人员'); return; }
 
-          setStage('阶段 1/5：拉齐白班（5白+2休）', 10, 100);
-          let cur = buildWhiteFiveTwo({ employees: targets, data, start, end, restPrefs });
+          const prioritizedTargets = sortedByHistory(targets, historyProfile);
+
+          setStage('阶段 1/6：拉齐白班（5白+2休）', 10, 100);
+          let cur = buildWhiteFiveTwo({ employees: prioritizedTargets, data, start, end, restPrefs });
           setData(cur); await new Promise(r=>setTimeout(r, 20));
 
-          setStage('阶段 2/5：按周期交替错开放中班', 30, 100);
-          cur = applyAlternateByCycle({ employees: targets, data: cur, start, end }, mixMax);
+          setStage('阶段 2/6：按周期交替错开放中班', 30, 100);
+          cur = applyAlternateByCycle({ employees: prioritizedTargets, data: cur, start, end }, mixMax);
           setData(cur); await new Promise(r=>setTimeout(r, 20));
 
-          setStage('阶段 3/5：按天比例收敛', 55, 100);
-          cur = clampDailyByRange({ employees: targets, data: cur, start, end, rMin, rMax, maxRounds: 300, mixMaxRatio: mixMax });
+          setStage('阶段 3/6：按天比例收敛', 55, 100);
+          cur = clampDailyByRange({ employees: prioritizedTargets, data: cur, start, end, rMin, rMax, maxRounds: 300, mixMaxRatio: mixMax });
           setData(cur); await new Promise(r=>setTimeout(r, 20));
 
-          setStage('阶段 4/5：个人比例收敛', 80, 100);
+          setStage('阶段 4/6：个人比例收敛', 78, 100);
           for(let sweep=0; sweep<8; sweep++){
-            cur = clampDailyByRange({ employees: targets, data: cur, start, end, rMin, rMax, maxRounds: 220, mixMaxRatio: mixMax });
-            cur = clampPersonByRange({ employees: targets, data: cur, start, end, pMin, pMax, maxRounds: 260, mixMaxRatio: mixMax });
+            cur = clampDailyByRange({ employees: prioritizedTargets, data: cur, start, end, rMin, rMax, maxRounds: 220, mixMaxRatio: mixMax });
+            cur = clampPersonByRange({ employees: prioritizedTargets, data: cur, start, end, pMin, pMax, maxRounds: 260, mixMaxRatio: mixMax });
             pushLog(`循环微调：第 ${sweep+1} 轮`);
           }
           setData(cur); await new Promise(r=>setTimeout(r, 20));
 
-          setStage('阶段 5/5：校验并微调', 95, 100);
-          cur = repairNoMidToWhite({ data: cur, employees: targets, start, end });
+          setStage('阶段 5/6：参考历史与行政天数调整', 92, 100);
+          cur = adjustWithHistory({ data: cur, employees: prioritizedTargets, start, end, adminDays, historyProfile, mixMaxRatio: mixMax });
+          setData(cur); await new Promise(r=>setTimeout(r, 20));
+
+          setStage('阶段 6/6：校验并微调', 98, 100);
+          cur = repairNoMidToWhite({ data: cur, employees: prioritizedTargets, start, end });
           setData(cur);
 
           endStage();
@@ -1551,8 +1902,6 @@
 
             <div className="flex flex-wrap items-center gap-3">
               <PillBtn color="indigo" onClick={runMainRule} disabled={prog.running}>开始自动排班</PillBtn>
-              <button className={`px-3 py-1.5 rounded-full bg-gray-100 text-sm ${editingLocked? 'opacity-50 cursor-not-allowed':''}`} disabled={editingLocked} onClick={()=> setData(buildWhiteFiveTwo({ employees: checkedList.length?checkedList:employees, data, start, end, restPrefs }))}>只拉齐白班（5+2）</button>
-              <button className={`px-3 py-1.5 rounded-full bg-gray-100 text-sm ${editingLocked? 'opacity-50 cursor-not-allowed':''}`} disabled={editingLocked} onClick={()=> setData(repairNoMidToWhite({ data, employees: checkedList.length?checkedList:employees, start, end }))}>一键校验/修复“中→白”相邻</button>
             </div>
 
             <div className="text-xs text-gray-500">规则说明：① 全程禁止生成“中1→白”相邻；② 严格遵守最多 6 天连续上班；③ 混合周期（白+中1 同在一周期）不超过设定比例；④ 夜/中2 不参与本算法但保留；⑤ 多轮“按天→按人”收敛，优先确保你的目标约束而非速度。</div>
@@ -1851,8 +2200,8 @@
               <div className="rounded-2xl border bg-gradient-to-br from-white via-white to-amber-50/60 p-4 space-y-3">
                 <div className="flex items-center gap-2 text-sm font-medium text-amber-700"><Icon name="magic" className="w-4 h-4"/>自动排班参数</div>
                 <div className="grid grid-cols-1 gap-2 text-sm text-gray-600">
-                  <label className="flex items-center justify-between gap-2">开始月份<input type="month" className="border rounded px-2 py-1" value={albumRangeStartMonth} onChange={e=> setAlbumRangeStartMonth(e.target.value)} /></label>
-                  <label className="flex items-center justify-between gap-2">结束月份<input type="month" className="border rounded px-2 py-1" value={albumRangeEndMonth} onChange={e=> setAlbumRangeEndMonth(e.target.value)} /></label>
+                  <label className="flex items-center justify-between gap-2">开始月份<MonthInput className="border rounded px-2 py-1" value={albumRangeStartMonth} onChange={setAlbumRangeStartMonth} disabled={editingLocked} /></label>
+                  <label className="flex items-center justify-between gap-2">结束月份<MonthInput className="border rounded px-2 py-1" value={albumRangeEndMonth} onChange={setAlbumRangeEndMonth} disabled={editingLocked} /></label>
                   <label className="flex items-center justify-between gap-2">白班时长（小时）<input type="number" step="0.01" min="0" className="border rounded px-2 py-1 w-24 text-right" value={albumWhiteHour}
                     onChange={e=> setAlbumWhiteHour(Number.parseFloat(e.target.value||'0')||0)} /></label>
                   <label className="flex items-center justify-between gap-2">中1时长（小时）<input type="number" step="0.01" min="0" className="border rounded px-2 py-1 w-24 text-right" value={albumMidHour}
@@ -2687,8 +3036,18 @@
       })();
 
       const ViewHistory = (
-        <Section title={`历史版本（${teamDisplayName}）`} right={<button onClick={loadVersions} className={`px-3 py-1.5 rounded-full text-sm text-white transition ${editingLocked?'bg-gray-300 cursor-not-allowed':'bg-gray-800 hover:bg-gray-700'}`} disabled={editingLocked}>刷新列表</button>}>
-          {versions.length===0 ? (
+        <Section title={`历史版本（${teamDisplayName}）`} right={<button onClick={loadVersions} className={`px-3 py-1.5 rounded-full text-sm text-white transition ${(editingLocked || versionsLoading)?'bg-gray-300 cursor-not-allowed':'bg-gray-800 hover:bg-gray-700'}`} disabled={editingLocked || versionsLoading}>
+          {versionsLoading ? (<span className="flex items-center gap-2"><Spinner className="w-4 h-4 text-white" /><span>刷新中…</span></span>) : '刷新列表'}
+        </button>}>
+          {versionsLoading && versions.length>0 && (
+            <div className="flex items-center gap-2 text-xs text-gray-500 mb-3">
+              <Spinner className="w-4 h-4 text-indigo-500" />
+              <span>正在刷新历史版本，请稍候…</span>
+            </div>
+          )}
+          {versionsLoading && versions.length===0 ? (
+            <div className="text-sm text-gray-500">正在加载历史版本…</div>
+          ) : versions.length===0 ? (
             <p className="text-sm text-gray-500">当前团队「{teamDisplayName}」暂无历史版本，请在“设置 / 导出”页保存新版本或稍后刷新。</p>
           ) : (
             <div className="overflow-auto max-h-64">
@@ -2701,7 +3060,7 @@
                     <th className="text-left py-2 px-3">保存时间</th>
                     <th className="text-left py-2 px-3">操作用户</th>
                     <th className="text-left py-2 px-3">备注</th>
-                    <th className="text-left py-2 px-3"></th>
+                    <th className="text-left py-2 px-3">操作</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2711,6 +3070,7 @@
                     const teamName = v.team_name || v.teamName || teamDisplayName;
                     const createdAt = v.created_at || v.createdAt || '—';
                     const operator = v.created_by_name || v.created_by || '管理员';
+                    const deleting = versionDeletingId === v.id;
                     return (
                       <tr key={v.id} className="border-t hover:bg-gray-50">
                         <td className="py-1 px-3">
@@ -2721,7 +3081,14 @@
                         <td className="py-1 px-3 text-gray-600">{createdAt}</td>
                         <td className="py-1 px-3 text-gray-600">{operator}</td>
                         <td className="py-1 px-3 text-gray-600">{remark || '—'}</td>
-                        <td className="py-1 px-3"><button className="text-indigo-600 hover:underline" onClick={()=>loadVersionById(v.id)}>载入</button></td>
+                        <td className="py-1 px-3">
+                          <div className="flex items-center gap-3">
+                            <button type="button" className="text-indigo-600 hover:underline disabled:text-gray-400 disabled:no-underline" onClick={()=>loadVersionById(v.id)} disabled={versionsLoading || deleting}>载入</button>
+                            <button type="button" className="flex items-center gap-1 text-rose-600 hover:underline disabled:text-rose-300 disabled:no-underline" onClick={()=>deleteVersionById(v.id)} disabled={deleting || versionsLoading}>
+                              {deleting ? (<><Spinner className="w-3.5 h-3.5 text-rose-500" /><span>删除中</span></>) : '删除'}
+                            </button>
+                          </div>
+                        </td>
                       </tr>
                     );
                   })}
@@ -2731,7 +3098,6 @@
           )}
         </Section>
       );
-
       const ViewSettings = (
         <Section title="设置 / 导出">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -2754,6 +3120,45 @@
                 <label key={s} className={`flex items-center gap-2 ${editingLocked?'opacity-60':''}`}><span className="w-10 text-right">{s}</span><input type="color" disabled={editingLocked} value={shiftColors[s]||'#ffffff'} onChange={e=> setShiftColors(p=>({ ...p, [s]: e.target.value }))} /></label>
               ))}
               <button className={`px-3 py-1.5 rounded ${editingLocked?'bg-gray-200 cursor-not-allowed':'bg-gray-100 hover:bg-gray-200'}`} disabled={editingLocked} onClick={()=> setShiftColors({'白':'#eef2ff','中1':'#e0f2fe','中2':'#cffafe','夜':'#fee2e2','休':'#f3f4f6'})}>恢复默认</button>
+            </div>
+          </div>
+          <div className="mt-6 space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold">在岗人数提醒颜色</h3>
+              <button className={`text-xs px-2 py-1 rounded ${editingLocked?'bg-gray-200 cursor-not-allowed':'bg-gray-100 hover:bg-gray-200'}`} disabled={editingLocked} onClick={()=> setStaffingAlerts(normalizeStaffingAlerts())}>恢复默认</button>
+            </div>
+            <div className="text-xs text-gray-500">可自定义排班表中「在岗 / 白 / 中1」统计的颜色提示。例如当中1 ≤ 3 时给出醒目颜色。</div>
+            <div className="space-y-3">
+              {[
+                { key:'total', label:'在岗总人数' },
+                { key:'white', label:'白班人数' },
+                { key:'mid1', label:'中1人数' }
+              ].map(item=>{
+                const conf = staffingAlerts[item.key];
+                return (
+                  <div key={item.key} className={`grid grid-cols-1 md:grid-cols-[180px_1fr] gap-3 items-center text-sm ${editingLocked?'opacity-70':''}`}>
+                    <div className="font-medium text-gray-700">{item.label}</div>
+                    <div className="grid grid-cols-1 md:grid-cols-[auto_auto_auto_auto] gap-2 items-center">
+                      <span className="text-xs text-gray-500">≤</span>
+                      <input type="number" className="w-20 border rounded px-2 py-1" value={conf?.threshold ?? 0} disabled={editingLocked} onChange={e=> setStaffingAlerts(prev=>{
+                        const next = normalizeStaffingAlerts(prev);
+                        next[item.key].threshold = Number(e.target.value || 0);
+                        return next;
+                      })} />
+                      <input type="color" className="w-16" disabled={editingLocked} value={conf?.lowColor || '#ffffff'} onChange={e=> setStaffingAlerts(prev=>{
+                        const next = normalizeStaffingAlerts(prev);
+                        next[item.key].lowColor = e.target.value;
+                        return next;
+                      })} />
+                      <div className="flex items-center gap-2 text-xs text-gray-500"><span>大于阈值</span><input type="color" className="w-16" disabled={editingLocked} value={conf?.highColor || '#ffffff'} onChange={e=> setStaffingAlerts(prev=>{
+                        const next = normalizeStaffingAlerts(prev);
+                        next[item.key].highColor = e.target.value;
+                        return next;
+                      })} /></div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </Section>
@@ -2908,7 +3313,6 @@
             <div className="flex items-center gap-2">
               <PillBtn onClick={exportExcel} color="sky" disabled={editingLocked}>导出</PillBtn>
               <button onClick={()=> clearRange('empty')} className={`px-3 py-1.5 rounded-full text-sm ${editingLocked?'bg-gray-200 cursor-not-allowed':'bg-amber-100 hover:bg-amber-200'}`} disabled={editingLocked}>清空当前范围</button>
-              <button onClick={()=> clearRange('rest')} className={`px-3 py-1.5 rounded-full text-sm ${editingLocked?'bg-gray-200 cursor-not-allowed':'bg-rose-100 hover:bg-rose-200'}`} disabled={editingLocked}>清空并填“休”</button>
               {user ? (<button onClick={async()=>{ await apiPost('/logout',{}).catch(()=>{}); setUser(null); }} className={`px-3 py-1.5 rounded-full text-sm ${editingLocked?'bg-gray-200 cursor-not-allowed':'bg-gray-200 hover:bg-gray-300'}`} disabled={editingLocked}>退出</button>) : (<span className="text-xs text-gray-500">未登录</span>)}
             </div>
           </div>
@@ -2928,6 +3332,13 @@
             <main className="animate-fade-in">{content}<footer className="text-center text-xs text-gray-400 py-6">© 排班助手（测试版） v2.3</footer></main>
           </div>
 
+          {toast && (
+            <div className="fixed top-4 right-4 z-50">
+              <div className={`animate-fade-in px-4 py-3 rounded-xl shadow-lg text-sm text-white ${toast.type==='success' ? 'bg-emerald-500' : toast.type==='error' ? 'bg-rose-500' : 'bg-gray-800'}`}>
+                {toast.message}
+              </div>
+            </div>
+          )}
           {prog.running && (
             <div className="floating-progress">
               <div className="fp-card rounded-2xl p-4 animate-fade-in">
