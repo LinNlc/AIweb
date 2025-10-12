@@ -139,6 +139,99 @@ function build_schedule_payload(array $row, string $teamFallback): array {
   return $merged;
 }
 
+function compute_history_profile(PDO $pdo, string $team, ?string $beforeStart = null): array {
+  $profile = [
+    'shiftTotals' => [],
+    'periodCount' => 0,
+    'lastAssignments' => [],
+    'ranges' => [],
+  ];
+
+  $sql = "SELECT id, view_start, view_end, payload, employees, data FROM schedule_versions WHERE team=?";
+  $params = [$team];
+  if ($beforeStart) {
+    $sql .= " AND view_end < ?";
+    $params[] = $beforeStart;
+  }
+  $sql .= " ORDER BY view_end DESC, id DESC LIMIT 24";
+
+  $stmt = $pdo->prepare($sql);
+  $stmt->execute($params);
+  $rows = $stmt->fetchAll();
+  if (!$rows) {
+    return $profile;
+  }
+
+  foreach ($rows as $index => $row) {
+    $payload = decode_json_assoc($row['payload'] ?? '');
+    $data = $payload['data'] ?? decode_json_assoc($row['data'] ?? '');
+    if (!is_array($data)) {
+      $data = [];
+    }
+    $employees = $payload['employees'] ?? json_decode($row['employees'] ?? '[]', true);
+    if (!is_array($employees)) {
+      $employees = [];
+    }
+    foreach ($employees as $emp) {
+      if (!isset($profile['shiftTotals'][$emp])) {
+        $profile['shiftTotals'][$emp] = ['white' => 0, 'mid' => 0, 'mid2' => 0, 'night' => 0, 'total' => 0];
+      }
+    }
+    foreach ($data as $day => $assignments) {
+      if (!is_array($assignments)) continue;
+      foreach ($assignments as $emp => $val) {
+        if (!isset($profile['shiftTotals'][$emp])) {
+          $profile['shiftTotals'][$emp] = ['white' => 0, 'mid' => 0, 'mid2' => 0, 'night' => 0, 'total' => 0];
+        }
+        switch ($val) {
+          case '白':
+            $profile['shiftTotals'][$emp]['white']++;
+            $profile['shiftTotals'][$emp]['total']++;
+            break;
+          case '中1':
+            $profile['shiftTotals'][$emp]['mid']++;
+            $profile['shiftTotals'][$emp]['total']++;
+            break;
+          case '中2':
+            $profile['shiftTotals'][$emp]['mid2']++;
+            $profile['shiftTotals'][$emp]['total']++;
+            break;
+          case '夜':
+            $profile['shiftTotals'][$emp]['night']++;
+            $profile['shiftTotals'][$emp]['total']++;
+            break;
+          default:
+            break;
+        }
+      }
+    }
+    if ($index === 0) {
+      $lastDay = null;
+      foreach (array_keys($data) as $day) {
+        if ($lastDay === null || strcmp((string)$day, (string)$lastDay) > 0) {
+          $lastDay = $day;
+        }
+      }
+      if ($lastDay !== null) {
+        $assignments = $data[$lastDay] ?? [];
+        if (is_array($assignments)) {
+          foreach ($assignments as $emp => $val) {
+            $profile['lastAssignments'][$emp] = $val;
+          }
+        }
+      }
+    }
+    $profile['periodCount']++;
+    $profile['ranges'][] = [
+      'start' => $row['view_start'] ?? '',
+      'end' => $row['view_end'] ?? '',
+      'id' => isset($row['id']) ? (int)$row['id'] : null,
+    ];
+  }
+
+  return $profile;
+}
+
 // ===== 路由 =====
 $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $path = preg_replace('#^/api#', '', $path) ?: '/';
@@ -192,6 +285,7 @@ switch (true) {
     if (!$row) {
       $viewStart = $start ?: date('Y-m-01');
       $viewEnd = $end ?: date('Y-m-t');
+      $historyProfile = compute_history_profile($pdo, $team, $start ?: null);
       send_json([
         'team'      => $team,
         'viewStart' => $viewStart,
@@ -205,9 +299,13 @@ switch (true) {
         'created_by_name' => null,
         'version_id'=> null,
         'versionId' => null,
+        'historyProfile' => $historyProfile,
       ]);
     } else {
-      send_json(build_schedule_payload($row, $team));
+      $result = build_schedule_payload($row, $team);
+      $rangeStart = $start ?: ($row['view_start'] ?? null);
+      $result['historyProfile'] = compute_history_profile($pdo, $team, $rangeStart);
+      send_json($result);
     }
 
   // 保存（新版本）——乐观锁：baseVersionId 不等于最新时返回 409
@@ -260,6 +358,7 @@ switch (true) {
       'pMax' => $in['pMax'] ?? null,
       'mixMax' => $in['mixMax'] ?? null,
       'shiftColors' => $in['shiftColors'] ?? null,
+      'staffingAlerts' => $in['staffingAlerts'] ?? null,
       'batchChecked' => $in['batchChecked'] ?? null,
       'albumSelected' => $in['albumSelected'] ?? null,
       'albumWhiteHour' => $in['albumWhiteHour'] ?? null,
@@ -270,6 +369,7 @@ switch (true) {
       'albumAssignments' => $in['albumAssignments'] ?? null,
       'albumAutoNote' => $in['albumAutoNote'] ?? null,
       'albumHistory' => $in['albumHistory'] ?? null,
+      'historyProfile' => $in['historyProfile'] ?? null,
       'operator' => $operator ?: '管理员',
     ];
     $snapshotJson = json_encode($snapshot, JSON_UNESCAPED_UNICODE);
@@ -359,7 +459,10 @@ switch (true) {
     $row = $stmt->fetch();
     if (!$row) send_error('未找到', 404);
     $team = $row['team'] ?? 'default';
-    send_json(build_schedule_payload($row, $team));
+    $result = build_schedule_payload($row, $team);
+    $rangeStart = $result['viewStart'] ?? ($row['view_start'] ?? null);
+    $result['historyProfile'] = compute_history_profile($pdo, $team, $rangeStart);
+    send_json($result);
 
   // 删除历史版本
   case $method === 'POST' && $path === '/schedule/version/delete':
