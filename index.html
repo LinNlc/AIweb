@@ -48,6 +48,12 @@
 
     const Icon = ({name, className=''}) => { const common = "w-5 h-5"; switch(name){ case 'grid': return <svg className={common+" "+className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 9h8V3H3v6zm10 12h8v-6h-8v6zM3 21h8v-6H3v6zm10-12h8V3h-8v6z" strokeWidth="1.5"/></svg>; case 'users': return <svg className={common+" "+className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M16 11c1.66 0 3-1.57 3-3.5S17.66 4 16 4s-3 1.57-3 3.5S14.34 11 16 11zM8 11c1.66 0 3-1.57 3-3.5S9.66 4 8 4 5 5.57 5 7.5 6.34 11 8 11zM8 13c-2.67 0-8 1.34-8 4v3h10v-3c0-1.1.9-2 2-2h4c.74 0 1.4.4 1.74 1" strokeWidth="1.5"/></svg>; case 'magic': return <svg className={common+" "+className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 21l9-9M14 7l3-3M11 10l3-3" strokeWidth="1.5"/></svg>; case 'chart': return <svg className={common+" "+className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 3v18h18M7 13v5M12 9v9M17 6v12" strokeWidth="1.5"/></svg>; case 'history': return <svg className={common+" "+className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 8v5l3 3M3 12a9 9 0 1 0 9-9 9 9 0 0 0-9 9zm0 0h3" strokeWidth="1.5"/></svg>; case 'cog': return <svg className={common+" "+className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 15.5A3.5 3.5 0 1 0 12 8.5a3.5 3.5 0 0 0 0 7z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V22a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1 1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a2 2 0 0 1-1.82.33 1.65 1.65 0 0 0-1.51 1H2a2 2 0 0 1 0-4h.09c-.49.2-.95.52-1.15 1z" strokeWidth="1"/></svg>; case 'lock': return <svg className={common+" "+className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>; default: return null; } };
 
+    const Spinner = ({ className = 'w-4 h-4 text-white' }) => (
+      <svg className={`animate-spin ${className}`} viewBox="0 0 24 24" fill="none">
+        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+        <path className="opacity-75" d="M4 12a8 8 0 0 1 8-8v4a4 4 0 0 0-4 4H4z" fill="currentColor"></path>
+      </svg>
+    );
     const colorClasses = { indigo: 'bg-indigo-600 hover:bg-indigo-500', emerald: 'bg-emerald-600 hover:bg-emerald-500', sky: 'bg-sky-600 hover:bg-sky-500', gray: 'bg-gray-800 hover:bg-gray-700' };
     const PillBtn = ({children, onClick, color='indigo', type='button', disabled=false, title=''}) => (
       <button type={type} disabled={disabled} onClick={onClick} title={title} className={`group relative overflow-hidden inline-flex items-center justify-center gap-2 rounded-full px-4 py-2 text-white ${disabled?'bg-gray-300 cursor-not-allowed':(colorClasses[color] || colorClasses.indigo)} transition-transform duration-200 ${disabled?'':'hover:-translate-y-0.5 active:translate-y-0'} shadow-md`}>
@@ -762,6 +768,21 @@
       const [data, setData] = useState({});
       const [versionId, setVersionId] = useState(null);
       const [versions, setVersions]   = useState([]);
+      const [versionsLoading, setVersionsLoading] = useState(false);
+      const [versionDeletingId, setVersionDeletingId] = useState(null);
+      const [toast, setToast] = useState(null);
+      const toastTimerRef = useRef(null);
+      useEffect(()=>{
+        return ()=>{
+          if(toastTimerRef.current) clearTimeout(toastTimerRef.current);
+        };
+      }, []);
+      const showToast = (message, type = 'info', duration = 2600) => {
+        if(!message) return;
+        if(toastTimerRef.current) clearTimeout(toastTimerRef.current);
+        setToast({ message, type });
+        toastTimerRef.current = setTimeout(()=> setToast(null), duration);
+      };
 
       const [prog, setProg] = useState({ running:false, stage:'', done:0, total:100 });
       const [logs, setLogs] = useState([]);
@@ -1247,6 +1268,10 @@
           if(res && (res.version_id || res.versionId)){
             lastLoadedVersionRef.current[team] = res.version_id || res.versionId;
           }
+          showToast('已保存新版本', 'success');
+          if(tab === 'history'){
+            loadVersions();
+          }
         } catch(e){
           if(e.payload && e.payload.code===409){
             if(confirm('服务器已有新版本，是否加载最新并覆盖？')) await loadFromServer();
@@ -1256,12 +1281,13 @@
         }
       }
       async function loadVersions(){
+        const trimmedTeam = (team || '').trim();
+        if(!trimmedTeam){
+          globalErr('请选择团队后再刷新历史版本');
+          return;
+        }
+        setVersionsLoading(true);
         try{
-          const trimmedTeam = (team || '').trim();
-          if(!trimmedTeam){
-            globalErr('请选择团队后再刷新历史版本');
-            return;
-          }
           const params = new URLSearchParams();
           params.set('team', trimmedTeam);
           params.set('start', '1970-01-01');
@@ -1284,6 +1310,8 @@
           }
         } catch(e){
           globalErr(e.message);
+        } finally {
+          setVersionsLoading(false);
         }
       }
       async function loadVersionById(id, options={}){
@@ -1295,6 +1323,29 @@
           if(!options?.silent){
             globalErr(e.message);
           }
+        }
+      }
+      async function deleteVersionById(id){
+        if(!id) return;
+        if(!confirm('确定删除该历史版本吗？删除后无法恢复。')) return;
+        const trimmedTeam = (team || '').trim();
+        if(!trimmedTeam){
+          globalErr('请选择团队后再操作');
+          return;
+        }
+        setVersionDeletingId(id);
+        try{
+          await apiPost('/schedule/version/delete', { id, team: trimmedTeam });
+          setVersions(prev=> prev.filter(v=> v.id !== id));
+          if(lastLoadedVersionRef.current[trimmedTeam] === id){
+            delete lastLoadedVersionRef.current[trimmedTeam];
+          }
+          showToast('已删除历史版本', 'success');
+          await loadVersions();
+        } catch(e){
+          globalErr(e.message);
+        } finally {
+          setVersionDeletingId(null);
         }
       }
       useEffect(()=>{
@@ -2687,8 +2738,18 @@
       })();
 
       const ViewHistory = (
-        <Section title={`历史版本（${teamDisplayName}）`} right={<button onClick={loadVersions} className={`px-3 py-1.5 rounded-full text-sm text-white transition ${editingLocked?'bg-gray-300 cursor-not-allowed':'bg-gray-800 hover:bg-gray-700'}`} disabled={editingLocked}>刷新列表</button>}>
-          {versions.length===0 ? (
+        <Section title={`历史版本（${teamDisplayName}）`} right={<button onClick={loadVersions} className={`px-3 py-1.5 rounded-full text-sm text-white transition ${(editingLocked || versionsLoading)?'bg-gray-300 cursor-not-allowed':'bg-gray-800 hover:bg-gray-700'}`} disabled={editingLocked || versionsLoading}>
+          {versionsLoading ? (<span className="flex items-center gap-2"><Spinner className="w-4 h-4 text-white" /><span>刷新中…</span></span>) : '刷新列表'}
+        </button>}>
+          {versionsLoading && versions.length>0 && (
+            <div className="flex items-center gap-2 text-xs text-gray-500 mb-3">
+              <Spinner className="w-4 h-4 text-indigo-500" />
+              <span>正在刷新历史版本，请稍候…</span>
+            </div>
+          )}
+          {versionsLoading && versions.length===0 ? (
+            <div className="text-sm text-gray-500">正在加载历史版本…</div>
+          ) : versions.length===0 ? (
             <p className="text-sm text-gray-500">当前团队「{teamDisplayName}」暂无历史版本，请在“设置 / 导出”页保存新版本或稍后刷新。</p>
           ) : (
             <div className="overflow-auto max-h-64">
@@ -2701,7 +2762,7 @@
                     <th className="text-left py-2 px-3">保存时间</th>
                     <th className="text-left py-2 px-3">操作用户</th>
                     <th className="text-left py-2 px-3">备注</th>
-                    <th className="text-left py-2 px-3"></th>
+                    <th className="text-left py-2 px-3">操作</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2711,6 +2772,7 @@
                     const teamName = v.team_name || v.teamName || teamDisplayName;
                     const createdAt = v.created_at || v.createdAt || '—';
                     const operator = v.created_by_name || v.created_by || '管理员';
+                    const deleting = versionDeletingId === v.id;
                     return (
                       <tr key={v.id} className="border-t hover:bg-gray-50">
                         <td className="py-1 px-3">
@@ -2721,7 +2783,14 @@
                         <td className="py-1 px-3 text-gray-600">{createdAt}</td>
                         <td className="py-1 px-3 text-gray-600">{operator}</td>
                         <td className="py-1 px-3 text-gray-600">{remark || '—'}</td>
-                        <td className="py-1 px-3"><button className="text-indigo-600 hover:underline" onClick={()=>loadVersionById(v.id)}>载入</button></td>
+                        <td className="py-1 px-3">
+                          <div className="flex items-center gap-3">
+                            <button type="button" className="text-indigo-600 hover:underline disabled:text-gray-400 disabled:no-underline" onClick={()=>loadVersionById(v.id)} disabled={versionsLoading || deleting}>载入</button>
+                            <button type="button" className="flex items-center gap-1 text-rose-600 hover:underline disabled:text-rose-300 disabled:no-underline" onClick={()=>deleteVersionById(v.id)} disabled={deleting || versionsLoading}>
+                              {deleting ? (<><Spinner className="w-3.5 h-3.5 text-rose-500" /><span>删除中</span></>) : '删除'}
+                            </button>
+                          </div>
+                        </td>
                       </tr>
                     );
                   })}
@@ -2731,7 +2800,6 @@
           )}
         </Section>
       );
-
       const ViewSettings = (
         <Section title="设置 / 导出">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -2928,6 +2996,13 @@
             <main className="animate-fade-in">{content}<footer className="text-center text-xs text-gray-400 py-6">© 排班助手（测试版） v2.3</footer></main>
           </div>
 
+          {toast && (
+            <div className="fixed top-4 right-4 z-50">
+              <div className={`animate-fade-in px-4 py-3 rounded-xl shadow-lg text-sm text-white ${toast.type==='success' ? 'bg-emerald-500' : toast.type==='error' ? 'bg-rose-500' : 'bg-gray-800'}`}>
+                {toast.message}
+              </div>
+            </div>
+          )}
           {prog.running && (
             <div className="floating-progress">
               <div className="fp-card rounded-2xl p-4 animate-fade-in">
