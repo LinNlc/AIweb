@@ -8,6 +8,7 @@ declare(strict_types=1);
 
 require __DIR__ . '/app/bootstrap.php';
 require __DIR__ . '/app/api/schedule.php';
+require __DIR__ . '/app/api/versions.php';
 
 // ===== 路由 =====
 $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
@@ -29,6 +30,10 @@ if ($servingIndex) {
 if ($method === 'OPTIONS') { http_response_code(204); exit; }
 
 if (handle_schedule_request($method, $path)) {
+  exit;
+}
+
+if (handle_versions_request($method, $path)) {
   exit;
 }
 
