@@ -1,6 +1,9 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/../core/Scheduler.php';
+require_once __DIR__ . '/../core/DTO.php';
+
 /**
  * 处理排班历史版本与导出相关的 API 路由。
  *

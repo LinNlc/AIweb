@@ -1,6 +1,9 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/../core/Scheduler.php';
+require_once __DIR__ . '/../core/DTO.php';
+
 /**
  * 处理排班相关的 API 路由。
  *
@@ -168,54 +171,4 @@ function schedule_save_version(): void
 
     $newId = (int) $pdo->lastInsertId();
     send_json(['ok' => true, 'version_id' => $newId]);
-}
-
-/**
- * 组装排班版本的快照数据，保证字段完整性。
- */
-function build_snapshot_payload(
-    array $input,
-    string $team,
-    string $viewStart,
-    string $viewEnd,
-    array $employees,
-    array $data,
-    string $note,
-    string $operator
-): array {
-    return [
-        'team' => $team,
-        'viewStart' => $viewStart,
-        'viewEnd' => $viewEnd,
-        'start' => $viewStart,
-        'end' => $viewEnd,
-        'employees' => array_values($employees),
-        'data' => $data,
-        'note' => $note,
-        'adminDays' => $input['adminDays'] ?? null,
-        'restPrefs' => $input['restPrefs'] ?? null,
-        'nightRules' => $input['nightRules'] ?? null,
-        'nightWindows' => $input['nightWindows'] ?? null,
-        'nightOverride' => $input['nightOverride'] ?? null,
-        'rMin' => $input['rMin'] ?? null,
-        'rMax' => $input['rMax'] ?? null,
-        'pMin' => $input['pMin'] ?? null,
-        'pMax' => $input['pMax'] ?? null,
-        'mixMax' => $input['mixMax'] ?? null,
-        'shiftColors' => $input['shiftColors'] ?? null,
-        'staffingAlerts' => $input['staffingAlerts'] ?? null,
-        'batchChecked' => $input['batchChecked'] ?? null,
-        'albumSelected' => $input['albumSelected'] ?? null,
-        'albumWhiteHour' => $input['albumWhiteHour'] ?? null,
-        'albumMidHour' => $input['albumMidHour'] ?? null,
-        'albumRangeStartMonth' => $input['albumRangeStartMonth'] ?? null,
-        'albumRangeEndMonth' => $input['albumRangeEndMonth'] ?? null,
-        'albumMaxDiff' => $input['albumMaxDiff'] ?? null,
-        'albumAssignments' => $input['albumAssignments'] ?? null,
-        'albumAutoNote' => $input['albumAutoNote'] ?? null,
-        'albumHistory' => $input['albumHistory'] ?? null,
-        'historyProfile' => $input['historyProfile'] ?? null,
-        'yearlyOptimize' => $input['yearlyOptimize'] ?? null,
-        'operator' => $operator,
-    ];
 }

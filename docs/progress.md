@@ -16,3 +16,8 @@
 - 新增 `app/api/versions.php` 负责历史版本查询、删除与导出，排班接口文件进一步瘦身。
 - 更新 `index.php` 引导版本模块路由，确保 API 委托关系清晰。
 - `schedule.php` 仅保留当期排班读取与保存逻辑，为后续引入核心算法层腾出空间。
+
+## 2025-10-14 第 4 步
+- 拆分排班数据装配逻辑至 `app/core/DTO.php`，统一管理快照与载荷结构。
+- 新建 `app/core/Scheduler.php` 收纳历史统计算法，API 层改为依赖核心模块。
+- `schedule.php`、`versions.php` 仅聚焦路由与参数处理，持续压缩控制器复杂度。
