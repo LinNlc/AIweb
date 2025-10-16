@@ -1,0 +1,2736 @@
+const { useState, useMemo, useEffect, useRef } = React;
+
+function globalErr(msg){ const bar = document.getElementById('errbar'); if(bar){ bar.textContent = '错误：' + msg; bar.className = 'show bg-red-50 text-red-700 text-sm px-4 py-2'; } }
+window.addEventListener('error', (e)=> globalErr(e?.message || '脚本错误'));
+window.addEventListener('unhandledrejection', (e)=> globalErr(e?.reason?.message || String(e?.reason || 'Promise 错误')));
+
+const { Icon, Spinner, PillBtn, Section } = window.AppUI || {};
+const { API_BASE = '/api', apiGet, apiPost } = window.AppAPI || {};
+const AppState = window.AppState || {};
+const {
+  WN,
+  today,
+  SHIFT_TYPES,
+  SHIFT_WORK_TYPES,
+  fmt,
+  monthRangeOf,
+  enumerateDates,
+  dow,
+  dateAdd,
+  monthListBetween,
+  monthKeyToSpan,
+  weekStartKey,
+  isWork,
+  getVal,
+  setVal,
+  countByEmpInRange,
+  countRunLeft,
+  countRunRight,
+  wouldExceed6,
+  REST_PAIRS,
+  MENU_KEYS,
+  defaultShiftColors,
+  defaultStaffingAlerts,
+  normalizeRestPair,
+  sanitizeRestPairValue,
+  sanitizeRestPrefsMap,
+  normalizeStaffingAlerts,
+  contrastColor,
+  styleForStaffing,
+  normalizeNightRules,
+  hashPassword,
+  verifyPassword,
+  defaultMenuPerms,
+  normalizeMenuPerms,
+  normalizeOrgConfig,
+  defaultOrgConfig,
+  createEmptyTeamState,
+  ORG_STORAGE_KEY,
+  TEAM_STATE_STORAGE_KEY,
+  pairToSet,
+  dayToW,
+  isRestDayForEmp,
+  buildWhiteFiveTwo,
+  buildWorkBlocks,
+  cyclesForEmp,
+  isRightEdgeWhite,
+  isLeftEdgeMid,
+  dailyMidCount,
+  dailyWhiteCount,
+  empMidCountInRange,
+  empWhiteCountInRange,
+  mixedCyclesCount,
+  longestRun,
+  trySetVal,
+  repairNoMidToWhite,
+  applyAlternateByCycle,
+  clampDailyByRange,
+  clampPersonByRange,
+  statsForEmployee,
+  sortedByHistory,
+  adjustEmployeeSchedule,
+  adjustWithHistory,
+  autoAssignNightAndM2
+} = AppState;
+
+function SideDock({tab,setTab, menuPerms}){
+  const [open,setOpen]=useState(false);
+  const items = [
+    { key:'grid', icon:'grid', label:'排班表格' },
+    { key:'batch', icon:'magic', label:'自动分配班次' },
+    { key:'album', icon:'magic', label:'专辑审核自动排班' },
+    { key:'users', icon:'users', label:'员工管理' },
+    { key:'stats', icon:'chart', label:'统计与对齐' },
+    { key:'history', icon:'history', label:'历史版本' },
+    { key:'settings', icon:'cog', label:'设置 / 导出' },
+    { key:'roles', icon:'lock', label:'角色设置' }
+  ];
+  return (
+    <div className={`dock fixed left-0 top-16 bottom-6 w-11 z-40 flex items-center`} onMouseEnter={()=>setOpen(true)} onMouseLeave={()=>setOpen(false)}>
+      <div className={`dock-panel absolute left-2 top-0 bottom-0 w-60 transform transition-transform duration-200 ${open? 'translate-x-0':'-translate-x-[115%]'} bg-white rounded-xl shadow p-2 border`}>
+        {items.filter(item=> menuPerms?.[item.key]?.visible).map(item=> (
+          <MenuButton key={item.key} active={tab===item.key} icon={item.icon} onClick={()=>setTab(item.key)}>{item.label}</MenuButton>
+        ))}
+      </div>
+      <div className="dock-tab absolute right-[-12px] top-1/2 -translate-y-1/2 w-6 h-18 rounded-r-lg flex items-center justify-center bg-white text-gray-700 cursor-pointer shadow" onClick={()=>setOpen(v=>!v)}>
+        <svg viewBox="0 0 20 20" className="w-4 h-4"><path d="M12 4l-6 6 6 6" fill="none" stroke="currentColor" strokeWidth="2"/></svg>
+      </div>
+    </div>
+  );
+}
+
+function TeamSwitcher({teams, value, onChange, disabled, onManage, canManage}){
+  const hasTeams = teams && teams.length>0;
+  return (
+    <div className="flex items-center gap-2">
+      <select className={`border rounded px-3 py-1.5 ${disabled?'bg-gray-100 cursor-not-allowed':''}`} value={hasTeams? value : ''}
+        onChange={e=> onChange(e.target.value)} disabled={disabled || !hasTeams}>
+        {hasTeams ? teams.map(team=> <option key={team.id} value={team.id}>{team.name}</option>) : <option value="">暂无团队</option>}
+      </select>
+      {canManage && (
+        <button type="button" onClick={onManage} className="p-1.5 rounded-full border text-gray-500 hover:text-indigo-600 hover:border-indigo-300" title="管理团队与权限">
+          <Icon name="cog" />
+        </button>
+      )}
+    </div>
+  );
+}
+
+function LoginModal({onSuccess, accounts}){
+  const [username, setUsername] = useState('admin');
+  const [password, setPassword] = useState('admin');
+  const [err, setErr] = useState('');
+  const [loading, setLoading] = useState(false);
+  async function doLogin(e){
+    e.preventDefault();
+    setErr('');
+    const accountEntry = Array.isArray(accounts) ? accounts.find(acc=> acc.username === username) : null;
+    if(accountEntry && username !== 'admin'){
+      if(!verifyPassword(accountEntry.passwordHash, password)){
+        setErr('密码错误');
+        return;
+      }
+      onSuccess({ username: accountEntry.username, display_name: accountEntry.displayName || accountEntry.username, role: accountEntry.role, localAccount: true });
+      return;
+    }
+    try{
+      setLoading(true);
+      const res = await apiPost('/login', { username, password });
+      onSuccess(res.user);
+    } catch(ex){
+      setErr(ex.message||'登录失败');
+    } finally {
+      setLoading(false);
+    }
+  }
+  return (
+    <div className="fixed inset-0 bg-black/20 backdrop-blur flex items-center justify-center z-50">
+      <form onSubmit={doLogin} className="bg-white rounded-2xl shadow-xl p-6 w-[360px] animate-fade-in">
+        <h2 className="text-lg font-semibold mb-4 text-center">管理员登录</h2>
+        <div className="space-y-3">
+          <div>
+            <label className="block text-sm text-gray-600 mb-1">用户名</label>
+            <input className="w-full border rounded px-3 py-2" value={username}
+              disabled={loading}
+              onCompositionStart={()=>{}}
+              onCompositionEnd={(e)=>setUsername(e.target.value)}
+              onChange={e=>setUsername(e.target.value)} />
+          </div>
+          <div>
+            <label className="block text-sm text-gray-600 mb-1">密码</label>
+            <input type="password" className="w-full border rounded px-3 py-2" value={password}
+              disabled={loading}
+              onCompositionStart={()=>{}}
+              onCompositionEnd={(e)=>setPassword(e.target.value)}
+              onChange={e=>setPassword(e.target.value)} />
+          </div>
+          {err && <div className="text-sm text-red-600">{err}</div>}
+          <button type="submit" disabled={loading} className={`w-full rounded-full text-white py-2 transition flex items-center justify-center gap-2 ${loading?'bg-indigo-400 cursor-not-allowed':'bg-indigo-600 hover:bg-indigo-500'}`}>
+            {loading && <Spinner className="w-4 h-4 text-white" />}
+            <span>登录</span>
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+const MonthInput = React.memo(function MonthInputComponent({ value, onChange, disabled=false, className='', placeholder='YYYY-MM' }){
+  const [draft, setDraft] = useState(()=> value || '');
+  useEffect(()=>{ setDraft(value || ''); }, [value]);
+  const format = (raw)=>{
+    const digits = String(raw||'').replace(/[^0-9]/g,'');
+    let next = digits.slice(0,4);
+    if(digits.length > 4){
+      next += '-' + digits.slice(4,6);
+    }
+    return next;
+  };
+  const commit = (input)=>{
+    if(!onChange) return;
+    if(!input){ onChange(''); return; }
+    const match = input.match(/^(\d{4})(?:-(\d{1,2}))?$/);
+    if(!match){ onChange(value || ''); return; }
+    const year = match[1];
+    const monthRaw = match[2] ?? '';
+    const monthNum = monthRaw ? parseInt(monthRaw, 10) : NaN;
+    const month = Number.isFinite(monthNum) ? Math.min(12, Math.max(1, monthNum)) : 1;
+    const normalized = `${year}-${String(month).padStart(2,'0')}`;
+    onChange(normalized);
+    setDraft(normalized);
+  };
+  const handleChange = (e)=>{
+    if(disabled) return;
+    const formatted = format(e.target.value);
+    setDraft(formatted);
+    if(formatted.length >= 7){
+      commit(formatted);
+    } else if(formatted === ''){
+      if(onChange) onChange('');
+    }
+  };
+  const handleBlur = ()=>{
+    if(disabled) return;
+    if(!draft){
+      if(onChange) onChange('');
+      return;
+    }
+    commit(draft);
+  };
+  return (
+    <input type="text" inputMode="numeric" pattern="\d{4}-\d{2}" className={className}
+      value={draft}
+      placeholder={placeholder}
+      disabled={disabled}
+      onChange={handleChange}
+      onBlur={handleBlur}
+    />
+  );
+});
+
+function App(){
+  const [user, setUser] = useState(null);
+  useEffect(()=>{ (async()=>{ try{ await apiPost('/logout',{}); } catch{} finally { setUser(null); } })(); },[]);
+
+  const [orgConfig, setOrgConfig] = useState(()=>{
+    try{
+      const raw = JSON.parse(localStorage.getItem(ORG_STORAGE_KEY)||'null');
+      return normalizeOrgConfig(raw||undefined);
+    }catch{
+      return normalizeOrgConfig();
+    }
+  });
+  const updateOrgConfig = (updater)=>{
+    setOrgConfig(prev=>{
+      const base = typeof updater === 'function' ? updater(prev) : updater;
+      return normalizeOrgConfig(base);
+    });
+  };
+  useEffect(()=>{ try{ localStorage.setItem(ORG_STORAGE_KEY, JSON.stringify(orgConfig)); }catch{} }, [orgConfig]);
+  const orgConfigLoadedRef = useRef(false);
+  const lastSyncedOrgConfigRef = useRef('');
+  useEffect(()=>{
+    let cancelled = false;
+    (async()=>{
+      try{
+        const res = await apiGet('/org-config');
+        if(cancelled) return;
+        if(res && res.config && typeof res.config === 'object'){
+          const normalized = normalizeOrgConfig(res.config);
+          lastSyncedOrgConfigRef.current = JSON.stringify(normalized);
+          updateOrgConfig(normalized);
+        }
+      }catch(e){
+        console.warn('加载 org 配置失败', e);
+      } finally {
+        if(!cancelled){
+          orgConfigLoadedRef.current = true;
+        }
+      }
+    })();
+    return ()=>{ cancelled = true; };
+  }, []);
+  useEffect(()=>{
+    if(!orgConfigLoadedRef.current) return;
+    const serialized = JSON.stringify(orgConfig);
+    if(serialized === lastSyncedOrgConfigRef.current) return;
+    const timer = setTimeout(()=>{
+      (async()=>{
+        try{
+          await apiPost('/org-config', { config: orgConfig });
+          lastSyncedOrgConfigRef.current = serialized;
+        }catch(e){
+          console.warn('保存 org 配置失败', e);
+        }
+      })();
+    }, 400);
+    return ()=> clearTimeout(timer);
+  }, [orgConfig]);
+
+  const [defaultStart, defaultEnd] = useMemo(()=> monthRangeOf(today), []);
+  const [teamStateMap, setTeamStateMap] = useState(()=>{
+    try{
+      const raw = JSON.parse(localStorage.getItem(TEAM_STATE_STORAGE_KEY)||'{}');
+      if(raw && typeof raw === 'object') return raw;
+    }catch{}
+    return {};
+  });
+  useEffect(()=>{ try{ localStorage.setItem(TEAM_STATE_STORAGE_KEY, JSON.stringify(teamStateMap)); }catch{} }, [teamStateMap]);
+  useEffect(()=>{
+    setTeamStateMap(prev=>{
+      let changed = false;
+      const next = { ...prev };
+      const valid = new Set();
+      orgConfig.teams.forEach(team=>{
+        valid.add(team.id);
+        if(!next[team.id]){
+          next[team.id] = createEmptyTeamState(defaultStart, defaultEnd);
+          changed = true;
+        }
+      });
+      Object.keys(next).forEach(id=>{
+        if(!valid.has(id)){
+          delete next[id];
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [orgConfig.teams, defaultStart, defaultEnd]);
+
+  const [team, setTeam] = useState(()=> (orgConfig.teams?.[0]?.id || 'default'));
+  const [note, setNote] = useState('');
+  const [start, setStart] = useState(defaultStart);
+  const [end, setEnd]     = useState(defaultEnd);
+  const [employees, setEmployees] = useState([]);
+  const [data, setData] = useState({});
+  const [versionId, setVersionId] = useState(null);
+  const [versions, setVersions]   = useState([]);
+  const [versionsLoading, setVersionsLoading] = useState(false);
+  const [versionDeletingId, setVersionDeletingId] = useState(null);
+  const [toast, setToast] = useState(null);
+  const toastTimerRef = useRef(null);
+  useEffect(()=>{
+    return ()=>{
+      if(toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
+  const showToast = (message, type = 'info', duration = 2600) => {
+    if(!message) return;
+    if(toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToast({ message, type });
+    toastTimerRef.current = setTimeout(()=> setToast(null), duration);
+  };
+
+  const [prog, setProg] = useState({ running:false, stage:'', done:0, total:100 });
+  const [logs, setLogs] = useState([]);
+  const logEndRef = useRef(null);
+  const pushLog = (msg)=> setLogs(prev=> [...prev.slice(-199), `[${new Date().toLocaleTimeString()}] ${msg}`]);
+  useEffect(()=>{ if(prog.running){ const t = setInterval(()=>{ pushLog('心跳：计算中…'); }, 1000); return ()=> clearInterval(t); } }, [prog.running]);
+  useEffect(()=>{ logEndRef.current && logEndRef.current.scrollIntoView({behavior:'auto'}); }, [logs]);
+  const setStage = (stage, done, total)=> { setProg({ running:true, stage, done, total }); pushLog(stage); };
+  const endStage = ()=> { setProg({ running:false, stage:'完成', done:100, total:100 }); pushLog('执行完成'); };
+
+  const [batchChecked, setBatchChecked] = useState({});
+  const checkedList = useMemo(()=> employees.filter(e=>batchChecked[e]), [employees, batchChecked]);
+
+  const [albumSelected, setAlbumSelected] = useState({});
+  const albumCheckedList = useMemo(()=> employees.filter(e=> albumSelected[e]), [employees, albumSelected]);
+  const [albumWhiteHour, setAlbumWhiteHour] = useState(0.22);
+  const [albumMidHour, setAlbumMidHour] = useState(0.06);
+  const [albumRangeStartMonth, setAlbumRangeStartMonth] = useState(defaultStart.slice(0,7));
+  const [albumRangeEndMonth, setAlbumRangeEndMonth] = useState(defaultEnd.slice(0,7));
+  const [albumMaxDiff, setAlbumMaxDiff] = useState(0.5);
+  const [albumAssignments, setAlbumAssignments] = useState({});
+  const [albumAutoNote, setAlbumAutoNote] = useState('');
+  const [albumHistory, setAlbumHistory] = useState([]);
+  const [accountPasswordDrafts, setAccountPasswordDrafts] = useState({});
+
+  const [shiftColors, setShiftColors] = useState({ ...defaultShiftColors });
+  const [staffingAlerts, setStaffingAlerts] = useState(()=> normalizeStaffingAlerts());
+  const [adminDays, setAdminDays] = useState(0);
+  const [restPrefs, setRestPrefs] = useState({});
+  const [nightWindows, setNightWindows] = useState([{ s: defaultStart, e: defaultEnd }]);
+  const [nightOverride, setNightOverride] = useState(true);
+  const [nightRules, setNightRules] = useState(()=> normalizeNightRules());
+
+  const [historyProfile, setHistoryProfile] = useState(null);
+
+  const [rMin, setRMin] = useState(0.3);
+  const [rMax, setRMax] = useState(0.7);
+  const [pMin, setPMin] = useState(0.3);
+  const [pMax, setPMax] = useState(0.7);
+  const [mixMax, setMixMax] = useState(1);
+  const [yearlyOptimize, setYearlyOptimize] = useState(false);
+
+  const skipSaveRef = useRef(false);
+  const skipLoadRef = useRef(false);
+  const initializedRef = useRef(false);
+
+  useEffect(()=>{
+    if(skipLoadRef.current){
+      skipLoadRef.current = false;
+      return;
+    }
+    const base = teamStateMap[team];
+    const fallback = createEmptyTeamState(defaultStart, defaultEnd);
+    const merged = base ? { ...fallback, ...base } : fallback;
+    skipSaveRef.current = true;
+    setStart(merged.start || defaultStart);
+    setEnd(merged.end || defaultEnd);
+    setEmployees(Array.isArray(merged.employees) ? merged.employees : []);
+    setData(merged.data || {});
+    setVersionId(merged.versionId || null);
+    setShiftColors(merged.shiftColors ? { ...defaultShiftColors, ...merged.shiftColors } : { ...defaultShiftColors });
+    setStaffingAlerts(normalizeStaffingAlerts(merged.staffingAlerts));
+    setAdminDays(Number(merged.adminDays||0));
+    setRestPrefs(sanitizeRestPrefsMap(merged.restPrefs||{}));
+    const wins = Array.isArray(merged.nightWindows) && merged.nightWindows.length ? merged.nightWindows : [{ s: merged.start || defaultStart, e: merged.end || defaultEnd }];
+    setNightWindows(wins.map(w=> ({ s: w.s || defaultStart, e: w.e || defaultEnd })));
+    setNightOverride(merged.nightOverride !== undefined ? !!merged.nightOverride : true);
+    setNightRules(normalizeNightRules(merged.nightRules));
+    setRMin(typeof merged.rMin === 'number' ? merged.rMin : 0.3);
+    setRMax(typeof merged.rMax === 'number' ? merged.rMax : 0.7);
+    setPMin(typeof merged.pMin === 'number' ? merged.pMin : 0.3);
+    setPMax(typeof merged.pMax === 'number' ? merged.pMax : 0.7);
+    setMixMax(typeof merged.mixMax === 'number' ? merged.mixMax : 1);
+    setYearlyOptimize(merged.yearlyOptimize === true);
+    setNote(typeof merged.note === 'string' ? merged.note : '');
+    setBatchChecked(merged.batchChecked || {});
+    setAlbumSelected(merged.albumSelected || {});
+    setAlbumWhiteHour(typeof merged.albumWhiteHour === 'number' ? merged.albumWhiteHour : 0.22);
+    setAlbumMidHour(typeof merged.albumMidHour === 'number' ? merged.albumMidHour : 0.06);
+    const startMonth = (merged.albumRangeStartMonth || (merged.start || defaultStart)).slice(0,7);
+    const endMonth = (merged.albumRangeEndMonth || (merged.end || defaultEnd)).slice(0,7);
+    setAlbumRangeStartMonth(startMonth);
+    setAlbumRangeEndMonth(endMonth);
+    setAlbumMaxDiff(typeof merged.albumMaxDiff === 'number' ? merged.albumMaxDiff : 0.5);
+    setAlbumAssignments(merged.albumAssignments || {});
+    setAlbumAutoNote(typeof merged.albumAutoNote === 'string' ? merged.albumAutoNote : '');
+    setAlbumHistory(Array.isArray(merged.albumHistory) ? merged.albumHistory.map(item=> ({ ...item, assignments: item.assignments || {} })) : []);
+    setHistoryProfile(merged.historyProfile || null);
+    initializedRef.current = true;
+  }, [team, teamStateMap, defaultStart, defaultEnd]);
+
+  useEffect(()=>{
+    if(!initializedRef.current) return;
+    if(skipSaveRef.current){
+      skipSaveRef.current = false;
+      return;
+    }
+    const snapshot = {
+      start,
+      end,
+      employees,
+      data,
+      versionId,
+      shiftColors,
+      staffingAlerts,
+      adminDays,
+      restPrefs: sanitizeRestPrefsMap(restPrefs),
+      nightWindows,
+      nightOverride,
+      nightRules,
+      rMin,
+      rMax,
+      pMin,
+      pMax,
+      mixMax,
+      note,
+      batchChecked,
+      albumSelected,
+      albumWhiteHour,
+      albumMidHour,
+      albumRangeStartMonth,
+      albumRangeEndMonth,
+      albumMaxDiff,
+      albumAssignments,
+      albumAutoNote,
+      albumHistory: Array.isArray(albumHistory) ? albumHistory.map(item=> ({ ...item, assignments: item.assignments || {} })) : [],
+      historyProfile,
+      yearlyOptimize
+    };
+    skipLoadRef.current = true;
+    setTeamStateMap(prev=> ({ ...prev, [team]: snapshot }));
+  }, [team, start, end, employees, data, versionId, shiftColors, staffingAlerts, adminDays, restPrefs, nightWindows, nightOverride, nightRules, rMin, rMax, pMin, pMax, mixMax, note, batchChecked, albumSelected, albumWhiteHour, albumMidHour, albumRangeStartMonth, albumRangeEndMonth, albumMaxDiff, albumAssignments, albumAutoNote, albumHistory, historyProfile, yearlyOptimize]);
+
+  const REST_STORE_KEY = 'scheduler_restprefs_store_v2';
+  function restStoreKey(team,start,end){ return `${team}__${start}__${end}`; }
+  function loadRestStore(){ try{ return JSON.parse(localStorage.getItem(REST_STORE_KEY)||'{}'); }catch{ return {}; } }
+  function saveRestStore(map){ try{ localStorage.setItem(REST_STORE_KEY, JSON.stringify(map||{})); }catch{} }
+  function saveRestForView(){ const map = loadRestStore(); map[restStoreKey(team,start,end)] = restPrefs; saveRestStore(map); }
+  function tryRestoreRestForView(){ const map = loadRestStore(); const hit = map[restStoreKey(team,start,end)]; if(hit && Object.keys(hit).length){ setRestPrefs(sanitizeRestPrefsMap(hit)); } }
+  useEffect(()=>{ if(Object.keys(restPrefs||{}).length) saveRestForView(); }, [restPrefs, team, start, end]);
+  useEffect(()=>{ tryRestoreRestForView(); }, [team, start, end]);
+
+  const teamsList = orgConfig.teams || [];
+  const accountConfig = useMemo(()=>{
+    if(!user) return null;
+    return orgConfig.accounts.find(acc=> acc.username === user.username) || null;
+  }, [orgConfig, user]);
+  const accessibleTeams = useMemo(()=>{
+    if(!user) return teamsList;
+    if(!accountConfig) return teamsList;
+    const access = Array.isArray(accountConfig.teamAccess) && accountConfig.teamAccess.length ? accountConfig.teamAccess : ['*'];
+    if(access.includes('*')) return teamsList;
+    const allow = new Set(access);
+    const filtered = teamsList.filter(t=> allow.has(t.id));
+    return filtered.length ? filtered : teamsList;
+  }, [teamsList, accountConfig, user]);
+  useEffect(()=>{
+    if(!accessibleTeams.some(t=> t.id === team) && accessibleTeams.length){
+      setTeam(accessibleTeams[0].id);
+    }
+  }, [accessibleTeams, team]);
+
+  const activeTeam = useMemo(()=> teamsList.find(t=> t.id === team) || teamsList[0] || { id: team, name: team, features:{ albumScheduler:true } }, [teamsList, team]);
+  const teamFeatures = activeTeam?.features || { albumScheduler:true };
+  const teamDisplayName = activeTeam?.name || team;
+  const canManageRoles = !!(user && user.username === 'admin');
+
+  const menuPerms = useMemo(()=>{
+    const perms = defaultMenuPerms();
+    if(accountConfig && accountConfig.menus){
+      MENU_KEYS.forEach(key=>{
+        const conf = accountConfig.menus[key];
+        if(conf){
+          if(typeof conf.visible === 'boolean') perms[key].visible = conf.visible;
+          if(typeof conf.editable === 'boolean') perms[key].editable = conf.editable;
+        }
+      });
+    }
+    if(teamFeatures && teamFeatures.albumScheduler === false){
+      perms.album.visible = false;
+    }
+    if(canManageRoles){
+      perms.roles.visible = true;
+    } else {
+      perms.roles.visible = false;
+      perms.roles.editable = false;
+    }
+    MENU_KEYS.forEach(key=>{ if(!perms[key].visible) perms[key].editable = false; });
+    return perms;
+  }, [accountConfig, teamFeatures, user]);
+
+  const [tab, setTab] = useState('batch');
+  const allowedTabs = useMemo(()=> MENU_KEYS.filter(key=> menuPerms[key]?.visible), [menuPerms]);
+  useEffect(()=>{
+    if(!allowedTabs.length) return;
+    if(!allowedTabs.includes(tab)){
+      setTab(allowedTabs[0]);
+    }
+  }, [allowedTabs, tab]);
+
+  useEffect(()=>{
+    if(allowedTabs.length === 0 && tab !== 'batch'){
+      setTab('batch');
+    }
+  }, [allowedTabs, tab]);
+
+  const viewReadOnly = menuPerms[tab]?.editable === false;
+  const editingLocked = prog.running || viewReadOnly;
+  useEffect(()=>{ setVersions([]); }, [team]);
+
+  const menuLabels = {
+    grid: '排班表格',
+    batch: '自动分配班次',
+    album: '专辑审核',
+    users: '员工管理',
+    stats: '统计与对齐',
+    history: '历史版本',
+    settings: '设置 / 导出',
+    roles: '角色设置'
+  };
+
+  const addTeam = ()=>{
+    updateOrgConfig(prev=>{
+      const existing = new Set((prev.teams||[]).map(t=>t.id));
+      const newId = ensureUniqueId(`team-${(prev.teams||[]).length+1}`, existing);
+      const newTeam = { id:newId, name:`新团队${(prev.teams||[]).length+1}`, remark:'', features:{ albumScheduler:true } };
+      return { ...prev, teams: [...(prev.teams||[]), newTeam] };
+    });
+  };
+  const updateTeamField = (id, key, value)=>{
+    updateOrgConfig(prev=>({
+      ...prev,
+      teams: prev.teams.map(t=> t.id===id ? { ...t, [key]: value } : t)
+    }));
+  };
+  const updateTeamFeature = (id, key, value)=>{
+    updateOrgConfig(prev=>({
+      ...prev,
+      teams: prev.teams.map(t=> t.id===id ? { ...t, features: { ...(t.features||{}), [key]: value } } : t)
+    }));
+  };
+  const removeTeam = (id)=>{
+    if((orgConfig.teams||[]).length<=1){ alert('至少保留一个团队'); return; }
+    if(!confirm('确定删除该团队及其本地设置？')) return;
+    updateOrgConfig(prev=>({
+      ...prev,
+      teams: prev.teams.filter(t=> t.id!==id)
+    }));
+    setTeamStateMap(prev=>{
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    if(team === id && teamsList.length>0){
+      const fallback = teamsList.find(t=> t.id!==id);
+      if(fallback) setTeam(fallback.id);
+    }
+  };
+
+  const updateAccountConfig = (username, updater)=>{
+    updateOrgConfig(prev=>({
+      ...prev,
+      accounts: prev.accounts.map(acc=> acc.username===username ? updater(acc) : acc)
+    }));
+  };
+  const addAccount = ()=>{
+    updateOrgConfig(prev=>{
+      const base = `user${(prev.accounts||[]).length+1}`;
+      const existing = new Set((prev.accounts||[]).map(acc=>acc.username));
+      let candidate = base;
+      let idx = 1;
+      while(existing.has(candidate) || candidate==='admin'){
+        candidate = `${base}${idx++}`;
+      }
+      const menus = defaultMenuPerms({ roles:{ visible:false, editable:false } });
+      const nextAcc = { username:candidate, displayName:'', role:'guest', passwordHash:'', menus, teamAccess:['*'] };
+      return { ...prev, accounts: [...prev.accounts, nextAcc] };
+    });
+  };
+  const removeAccount = (username)=>{
+    if(username==='admin') return;
+    if(!confirm('确定删除该账号？')) return;
+    updateOrgConfig(prev=>({
+      ...prev,
+      accounts: prev.accounts.filter(acc=> acc.username!==username)
+    }));
+    setAccountPasswordDrafts(prev=>{
+      if(!(username in prev)) return prev;
+      const next = { ...prev }; delete next[username]; return next;
+    });
+    if(user && user.username === username){ setUser(null); }
+  };
+  const setAccountUsername = (username, nextUsername)=>{
+    const trimmed = (nextUsername||'').trim();
+    if(!trimmed || trimmed === 'admin'){
+      alert('账号名不可为空或为 admin');
+      return;
+    }
+    if(orgConfig.accounts.some(acc=> acc.username === trimmed && acc.username !== username)){
+      alert('账号名已存在');
+      return;
+    }
+    updateAccountConfig(username, acc=> ({ ...acc, username: trimmed }));
+    setAccountPasswordDrafts(prev=>{
+      if(!(username in prev)) return prev;
+      const next = { ...prev };
+      next[trimmed] = next[username];
+      delete next[username];
+      return next;
+    });
+    if(user && user.username === username){ setUser(prev=> prev? { ...prev, username: trimmed } : prev); }
+  };
+  const setAccountDisplayName = (username, value)=> updateAccountConfig(username, acc=> ({ ...acc, displayName: value }));
+  const setAccountRole = (username, role)=> updateAccountConfig(username, acc=> ({ ...acc, role }));
+  const setAccountPassword = (username)=>{
+    const raw = accountPasswordDrafts[username] || '';
+    updateAccountConfig(username, acc=> ({ ...acc, passwordHash: hashPassword(raw) }));
+    setAccountPasswordDrafts(prev=> ({ ...prev, [username]: '' }));
+  };
+  const updateAccountPasswordDraft = (username, value)=>{
+    setAccountPasswordDrafts(prev=> ({ ...prev, [username]: value }));
+  };
+  const updateAccountMenu = (username, key, field, value)=>{
+    updateAccountConfig(username, acc=>{
+      const baseMenus = defaultMenuPerms();
+      const current = (acc.menus && acc.menus[key]) ? acc.menus[key] : baseMenus[key];
+      const nextMenus = { ...acc.menus, [key]: { ...current, [field]: value } };
+      if(!nextMenus[key].visible){ nextMenus[key].editable = false; }
+      return { ...acc, menus: nextMenus };
+    });
+  };
+  const setAccountAllTeams = (username, enabled)=>{
+    updateAccountConfig(username, acc=> ({ ...acc, teamAccess: enabled ? ['*'] : [] }));
+  };
+  const toggleAccountTeam = (username, teamId)=>{
+    updateAccountConfig(username, acc=>{
+      if(acc.teamAccess && acc.teamAccess.includes('*')){
+        const rest = teamsList.filter(t=> t.id !== teamId).map(t=>t.id);
+        return { ...acc, teamAccess: rest.length ? rest : ['*'] };
+      }
+      const set = new Set(acc.teamAccess||[]);
+      if(set.has(teamId)){
+        if(set.size<=1){
+          alert('至少保留一个团队');
+          return acc;
+        }
+        set.delete(teamId);
+      } else {
+        set.add(teamId);
+      }
+      if(set.size === teamsList.length){
+        return { ...acc, teamAccess:['*'] };
+      }
+      return { ...acc, teamAccess: Array.from(set) };
+    });
+  };
+
+  const lastLoadedVersionRef = useRef({});
+  const autoLoadedTeamRef = useRef({});
+  useEffect(()=>{ lastLoadedVersionRef.current = {}; autoLoadedTeamRef.current = {}; }, [user?.username]);
+  const autoLoadKey = useMemo(()=>{
+    const safeTeam = team || 'default';
+    const safeStart = (start || '').slice(0,10);
+    const safeEnd = (end || '').slice(0,10);
+    const flag = yearlyOptimize ? 'on' : 'off';
+    return `${safeTeam}__${flag}__${safeStart}__${safeEnd}`;
+  }, [team, start, end, yearlyOptimize]);
+  function applyServerState(payload){
+    if(!payload || typeof payload !== 'object') return;
+    const get = (...keys)=>{
+      for(const key of keys){
+        if(payload[key] !== undefined && payload[key] !== null){
+          return payload[key];
+        }
+      }
+      return undefined;
+    };
+    const viewStart = get('viewStart','view_start','start');
+    const viewEnd = get('viewEnd','view_end','end');
+    if(typeof viewStart === 'string' && viewStart){ setStart(viewStart.slice(0,10)); }
+    if(typeof viewEnd === 'string' && viewEnd){ setEnd(viewEnd.slice(0,10)); }
+    const version = get('versionId','version_id');
+    if(version){ setVersionId(version); }
+    const employeesPayload = get('employees');
+    if(Array.isArray(employeesPayload)){ setEmployees(employeesPayload); }
+    const dataPayload = get('data');
+    if(dataPayload && typeof dataPayload === 'object'){ setData(dataPayload); }
+    const restPayload = get('restPrefs','rest_prefs');
+    if(restPayload){ setRestPrefs(sanitizeRestPrefsMap(restPayload)); }
+    const nightRulesPayload = get('nightRules','night_rules');
+    if(nightRulesPayload){ setNightRules(normalizeNightRules(nightRulesPayload)); }
+    const nightWindowsPayload = get('nightWindows','night_windows');
+    if(Array.isArray(nightWindowsPayload) && nightWindowsPayload.length){
+      setNightWindows(nightWindowsPayload.map(w=> ({
+        s: typeof w?.s === 'string' ? w.s : (typeof w?.start === 'string' ? w.start : start),
+        e: typeof w?.e === 'string' ? w.e : (typeof w?.end === 'string' ? w.end : end)
+      })));
+    }
+    const nightOverridePayload = get('nightOverride','night_override');
+    if(typeof nightOverridePayload === 'boolean'){ setNightOverride(nightOverridePayload); }
+    const adminDaysPayload = get('adminDays','admin_days');
+    if(typeof adminDaysPayload === 'number'){ setAdminDays(adminDaysPayload); }
+    const shiftPayload = get('shiftColors','shift_colors');
+    if(shiftPayload && typeof shiftPayload === 'object'){
+      setShiftColors(prev=> ({ ...defaultShiftColors, ...prev, ...shiftPayload }));
+    }
+    const staffingPayload = get('staffingAlerts','staffing_alerts');
+    if(staffingPayload){
+      setStaffingAlerts(normalizeStaffingAlerts(staffingPayload));
+    }
+    const notePayload = get('note','remark');
+    if(typeof notePayload === 'string'){ setNote(notePayload); }
+    const rMinPayload = get('rMin','r_min');
+    if(typeof rMinPayload === 'number'){ setRMin(rMinPayload); }
+    const rMaxPayload = get('rMax','r_max');
+    if(typeof rMaxPayload === 'number'){ setRMax(rMaxPayload); }
+    const pMinPayload = get('pMin','p_min');
+    if(typeof pMinPayload === 'number'){ setPMin(pMinPayload); }
+    const pMaxPayload = get('pMax','p_max');
+    if(typeof pMaxPayload === 'number'){ setPMax(pMaxPayload); }
+    const mixMaxPayload = get('mixMax','mix_max');
+    if(typeof mixMaxPayload === 'number'){ setMixMax(mixMaxPayload); }
+    const batchPayload = get('batchChecked','batch_checked');
+    if(batchPayload && typeof batchPayload === 'object'){ setBatchChecked({ ...batchPayload }); }
+    const albumSelectedPayload = get('albumSelected','album_selected');
+    if(albumSelectedPayload && typeof albumSelectedPayload === 'object'){ setAlbumSelected({ ...albumSelectedPayload }); }
+    const albumWhitePayload = get('albumWhiteHour','album_white_hour');
+    if(typeof albumWhitePayload === 'number'){ setAlbumWhiteHour(albumWhitePayload); }
+    const albumMidPayload = get('albumMidHour','album_mid_hour');
+    if(typeof albumMidPayload === 'number'){ setAlbumMidHour(albumMidPayload); }
+    const albumRangeStartPayload = get('albumRangeStartMonth','album_range_start_month');
+    if(typeof albumRangeStartPayload === 'string'){ setAlbumRangeStartMonth(albumRangeStartPayload); }
+    const albumRangeEndPayload = get('albumRangeEndMonth','album_range_end_month');
+    if(typeof albumRangeEndPayload === 'string'){ setAlbumRangeEndMonth(albumRangeEndPayload); }
+    const albumMaxDiffPayload = get('albumMaxDiff','album_max_diff');
+    if(typeof albumMaxDiffPayload === 'number'){ setAlbumMaxDiff(albumMaxDiffPayload); }
+    const albumAssignmentsPayload = get('albumAssignments','album_assignments');
+    if(albumAssignmentsPayload && typeof albumAssignmentsPayload === 'object'){
+      try{
+        setAlbumAssignments(JSON.parse(JSON.stringify(albumAssignmentsPayload)));
+      }catch{
+        setAlbumAssignments({ ...albumAssignmentsPayload });
+      }
+    }
+    const albumAutoNotePayload = get('albumAutoNote','album_auto_note');
+    if(typeof albumAutoNotePayload === 'string'){ setAlbumAutoNote(albumAutoNotePayload); }
+    const albumHistoryPayload = get('albumHistory','album_history');
+    if(Array.isArray(albumHistoryPayload)){
+      setAlbumHistory(albumHistoryPayload.map(item=> ({ ...item, assignments: item?.assignments || {} })));
+    }
+    const historyPayload = get('historyProfile','history_profile');
+    if(historyPayload){ setHistoryProfile(historyPayload); }
+    const yearlyOptimizePayload = get('yearlyOptimize','year_optimize');
+    if(yearlyOptimizePayload !== undefined){
+      const enabled = yearlyOptimizePayload === true || yearlyOptimizePayload === 1 || yearlyOptimizePayload === '1';
+      setYearlyOptimize(enabled);
+    }
+    tryRestoreRestForView();
+  }
+  async function loadFromServer(){
+    try {
+      const params = new URLSearchParams();
+      if(team) params.set('team', team);
+      if(start) params.set('start', start);
+      if(end) params.set('end', end);
+      if(yearlyOptimize){
+        const yrMatch = (start || '').match(/^(\d{4})/);
+        if(yrMatch){
+          params.set('historyYearStart', `${yrMatch[1]}-01-01`);
+          params.set('yearOptimize', '1');
+        }
+      }
+      const query = params.toString();
+      const res = await apiGet(`/schedule?${query}`);
+      applyServerState({ ...res, versionId: res.version_id || res.versionId });
+      const latestVersion = res.version_id || res.versionId;
+      if(latestVersion){
+        lastLoadedVersionRef.current[team] = latestVersion;
+      }
+    } catch(e){
+      globalErr(e.message);
+    }
+  }
+  async function saveToServer(){
+    try{
+      const operator = (user && (user.display_name || user.username)) || '管理员';
+      const safeNightRules = normalizeNightRules(nightRules);
+      const payload = {
+        team,
+        viewStart: start,
+        viewEnd: end,
+        start,
+        end,
+        employees,
+        data,
+        baseVersionId: versionId,
+        note,
+        operator,
+        adminDays,
+        restPrefs: sanitizeRestPrefsMap(restPrefs),
+        nightRules: safeNightRules,
+        nightWindows,
+        nightOverride,
+        rMin,
+        rMax,
+        pMin,
+        pMax,
+        mixMax,
+        shiftColors,
+        staffingAlerts,
+        batchChecked,
+        albumSelected,
+        albumWhiteHour,
+        albumMidHour,
+        albumRangeStartMonth,
+        albumRangeEndMonth,
+        albumMaxDiff,
+        albumAssignments,
+        albumAutoNote,
+        albumHistory,
+        historyProfile,
+        yearlyOptimize
+      };
+      const res = await apiPost('/schedule/save', payload);
+      applyServerState({ ...payload, versionId: res.version_id || res.versionId || versionId });
+      if(res && (res.version_id || res.versionId)){
+        lastLoadedVersionRef.current[team] = res.version_id || res.versionId;
+      }
+      showToast('已保存新版本', 'success');
+      if(tab === 'history'){
+        loadVersions();
+      }
+    } catch(e){
+      if(e.payload && e.payload.code===409){
+        if(confirm('服务器已有新版本，是否加载最新并覆盖？')) await loadFromServer();
+        return;
+      }
+      globalErr(e.message);
+    }
+  }
+  async function loadVersions(){
+    const trimmedTeam = (team || '').trim();
+    if(!trimmedTeam){
+      globalErr('请选择团队后再刷新历史版本');
+      return;
+    }
+    setVersionsLoading(true);
+    try{
+      const params = new URLSearchParams();
+      params.set('team', trimmedTeam);
+      params.set('start', '1970-01-01');
+      params.set('end', '2100-12-31');
+      const res = await apiGet(`/schedule/versions?${params.toString()}`);
+      const list = Array.isArray(res.versions) ? res.versions.slice() : [];
+      list.sort((a,b)=>{
+        const at = Date.parse(a.created_at || a.createdAt || 0) || 0;
+        const bt = Date.parse(b.created_at || b.createdAt || 0) || 0;
+        return bt - at;
+      });
+      setVersions(list);
+      if(list.length){
+        const latestId = list[0]?.id;
+        if(latestId && lastLoadedVersionRef.current[trimmedTeam] !== latestId){
+          await loadVersionById(latestId, { silent:true });
+        }
+      } else {
+        delete lastLoadedVersionRef.current[trimmedTeam];
+      }
+    } catch(e){
+      globalErr(e.message);
+    } finally {
+      setVersionsLoading(false);
+    }
+  }
+  async function loadVersionById(id, options={}){
+    try{
+      const res = await apiGet(`/version?id=${id}`);
+      applyServerState({ ...res, versionId: id });
+      lastLoadedVersionRef.current[team] = id;
+    } catch(e){
+      if(!options?.silent){
+        globalErr(e.message);
+      }
+    }
+  }
+  async function deleteVersionById(id){
+    if(!id) return;
+    if(!confirm('确定删除该历史版本吗？删除后无法恢复。')) return;
+    const trimmedTeam = (team || '').trim();
+    if(!trimmedTeam){
+      globalErr('请选择团队后再操作');
+      return;
+    }
+    setVersionDeletingId(id);
+    try{
+      await apiPost('/schedule/version/delete', { id, team: trimmedTeam });
+      setVersions(prev=> prev.filter(v=> v.id !== id));
+      if(lastLoadedVersionRef.current[trimmedTeam] === id){
+        delete lastLoadedVersionRef.current[trimmedTeam];
+      }
+      showToast('已删除历史版本', 'success');
+      await loadVersions();
+    } catch(e){
+      globalErr(e.message);
+    } finally {
+      setVersionDeletingId(null);
+    }
+  }
+  useEffect(()=>{
+    if(!user) return;
+    if(!team) return;
+    const key = autoLoadKey;
+    if(autoLoadedTeamRef.current[key]) return;
+    autoLoadedTeamRef.current[key] = true;
+    loadFromServer();
+  }, [autoLoadKey, team, user]);
+  async function doLogout(){ try{ await apiPost('/logout',{}); setUser(null);}catch{} }
+  function exportExcel(){ const url = `${API_BASE}/export/xlsx?team=${encodeURIComponent(team)}&start=${start}&end=${end}`; window.location.href=url; }
+
+  useEffect(()=>{
+    if(tab === 'history'){
+      loadVersions();
+    }
+  }, [tab, team]);
+
+  const dateList = useMemo(()=> enumerateDates(start, end), [start,end]);
+  const activeCellRef = useRef(null);
+  function setCellByIndex(dIndex, eIndex, value){ const d = dateList[dIndex]; const emp = employees[eIndex]; if(!d||!emp) return; setData(prev=>{ const next = { ...prev }; const row = { ...(next[d]||{}) }; row[emp] = value; next[d] = row; return next; }); }
+  function onFocusCell(dIndex, eIndex){ activeCellRef.current = { dIndex, eIndex }; }
+  function moveActive(dx, dy){ const cur = activeCellRef.current || { dIndex:0, eIndex:0 }; const ni = Math.max(0, Math.min((cur.dIndex||0) + dy, dateList.length-1)); const nj = Math.max(0, Math.min((cur.eIndex||0) + dx, employees.length-1)); activeCellRef.current = { dIndex: ni, eIndex: nj }; const id = `cell-${ni}-${nj}`; const el = document.getElementById(id); if(el) el.focus(); }
+  function openPickerAt(di, ei, anchorEl){ if(editingLocked) return; const el = anchorEl || document.getElementById(`cell-${di}-${ei}`); if(!el) return; const rect = el.getBoundingClientRect(); setPicker({ open:true, di, ei, x: rect.left + window.scrollX, y: rect.bottom + window.scrollY + 4 }); }
+  function onKeyDownCell(e, di, ei){ if(e.isComposing) return; if(e.altKey && (e.key==='ArrowDown' || e.key==='Enter')){ e.preventDefault(); openPickerAt(di, ei, e.currentTarget); return; } if(e.key==='Enter'){ e.preventDefault(); moveActive(1,0); } else if(e.key==='ArrowRight'){ e.preventDefault(); moveActive(1,0); } else if(e.key==='ArrowLeft'){ e.preventDefault(); moveActive(-1,0); } else if(e.key==='ArrowDown'){ e.preventDefault(); moveActive(0,1); } else if(e.key==='ArrowUp'){ e.preventDefault(); moveActive(0,-1); } }
+
+  function clearRange(mode='empty'){
+    setData(prev=>{ const next={...prev}; for(const d of dateList){ const r={...(next[d]||{})}; for(const e of employees){ r[e] = (mode==='rest')? '休' : ''; } next[d]=r; } return next; });
+  }
+
+  const dailyStats = useMemo(()=>{ const m={}; for(const d of dateList){ const row=data[d]||{}; const stat={总:0, 白:0, 中1:0, 中2:0, 夜:0}; for(const e of employees){ const v=row[e]; if(!v || v==='休') continue; stat['总']++; if(v==='白') stat['白']++; else if(v==='中1') stat['中1']++; else if(v==='中2') stat['中2']++; else if(v==='夜') stat['夜']++; } m[d]=stat; } return m; }, [data, dateList, employees]);
+
+  const nightIssues = useMemo(()=>{ const issues={}; function inAnyWin(day){ for(const w of nightWindows){ if(!w.s||!w.e) continue; if(day>=w.s && day<=w.e) return true; } return false; } for(const d of dateList){ if(!inAnyWin(d)) continue; const row=data[d]||{}; const vals=Object.values(row); const hasN = vals.includes('夜'); const hasM2 = vals.includes('中2'); let msg=''; if(!hasN && !hasM2) msg='缺夜&中2'; else if(!hasN) msg='缺夜'; else if(!hasM2) msg='缺中2'; if(msg) issues[d]=msg; } return issues; }, [nightWindows, data, dateList]);
+
+  // —— 新增：全局单个浮动班次选择器 ——
+  const [picker, setPicker] = useState({ open:false, di:null, ei:null, x:0, y:0 });
+  const pickerRef = useRef(null);
+  useEffect(()=>{
+    function onDocDown(ev){ if(!picker.open) return; if(pickerRef.current && !pickerRef.current.contains(ev.target)) setPicker(p=>({...p, open:false})); }
+    document.addEventListener('mousedown', onDocDown);
+    return ()=> document.removeEventListener('mousedown', onDocDown);
+  }, [picker.open]);
+
+  const gridEmpCounts = useMemo(()=> countByEmpInRange(employees, data, start, end), [employees, data, start, end]);
+
+  const ViewGrid = (
+    <Section title="排班表格" right={<span className="text-sm text-gray-500">提示：点击单元格→直接输入或从 Excel 粘贴；支持 IME 连续输入 {editingLocked && <span className='inline-flex items-center gap-1 text-rose-600 ml-2'><Icon name='lock'/>执行中：只读</span>}</span>}>
+      {employees.length===0 ? (
+        <div className="text-sm text-gray-500">请先在「员工管理」中添加员工。</div>
+      ) : (
+        <>
+          <div className="grid-wrap border rounded-xl shadow-inner" onPaste={(e)=>{ if(editingLocked) return; const cur = activeCellRef.current; if(!cur) return; const text = e.clipboardData.getData('text'); if(!text) return; e.preventDefault(); const rows = text.replace(/\r/g,'').split('\n').filter(x=>x.length>0).map(r=>r.split(/\t|,/)); const baseI = cur.eIndex; const baseD = cur.dIndex; setData(prev=>{ const next = { ...prev }; for(let r=0; r<rows.length; r++){ const d = dateList[baseD + r]; if(!d) break; const row = { ...(next[d]||{}) }; for(let c=0; c<rows[r].length; c++){ const emp = employees[baseI + c]; if(!emp) break; row[emp] = rows[r][c]; } next[d] = row; } return next; }); }}>
+            <table className="min-w-max text-sm w-full">
+              <thead>
+                <tr className="bg-gray-50">
+                  <th className="sticky py-2 px-3 text-left left-sticky" style={{minWidth:'8.5rem'}}>日期</th>
+                  <th className="sticky py-2 px-3 text-left left-sticky-2" style={{minWidth:'6.5rem'}}>星期</th>
+                  <th className="sticky py-2 px-3 text-left left-sticky-3" style={{minWidth:'9rem'}}>问题</th>
+                  {employees.map(e=> {
+                    const diff = (gridEmpCounts[e]?.总||0) - Number(adminDays||0);
+                    const diffCls = diff===0? 'bg-gray-100 text-gray-700' : (diff>0? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700');
+                    return (
+                      <th key={e} className="sticky py-2 px-3 text-left">
+                        <div className="flex items-center gap-2">
+                          <span>{e}</span>
+                          <span className={`badge ${diffCls}`} title="差值=实际总天数-行政班应上天数">{diff>0?`+${diff}`:diff}</span>
+                        </div>
+                      </th>
+                    );
+                  })}
+                </tr>
+              </thead>
+              <tbody>
+                {dateList.map((d,di)=> {
+                  const w = dow(d); const weekend=(w===0||w===6);
+                  const row=data[d]||{}; const issue = nightIssues[d]||'';
+                  const stat = dailyStats[d]||{总:0,白:0,中1:0,中2:0,夜:0};
+                  return (
+                    <tr key={d} className={"border-t hover:bg-indigo-50/30 "+(weekend? 'bg-gray-50' : '')}>
+                      <td className={`py-1.5 px-3 font-medium text-gray-800 left-sticky`} style={{minWidth:'8.5rem'}}>
+                        <div className="flex items-center gap-2"><span>{d}</span></div>
+                        <div className="text-xs text-gray-500 flex flex-wrap items-center gap-1">
+                          <span style={styleForStaffing(stat['总'], staffingAlerts.total)}>在岗 {stat['总']}</span>
+                          <span>（</span>
+                          <span style={styleForStaffing(stat['白'], staffingAlerts.white)}>白 {stat['白']}</span>
+                          <span>/</span>
+                          <span style={styleForStaffing(stat['中1'], staffingAlerts.mid1)}>中1 {stat['中1']}</span>
+                          <span>/</span>
+                          <span>中2 {stat['中2']}</span>
+                          <span>/</span>
+                          <span>夜 {stat['夜']}</span>
+                          <span>）</span>
+                        </div>
+                      </td>
+                      <td className="py-1.5 px-3 text-gray-500 left-sticky-2" style={{minWidth:'6.5rem'}}>周{WN[w]}</td>
+                      <td className="py-1.5 px-3 left-sticky-3" style={{minWidth:'9rem'}}>
+                        {issue? <span className={`badge ${issue==='缺夜&中2'?'bg-red-100 text-red-700':'bg-amber-100 text-amber-700'}`}>{issue}</span> : <span className="text-gray-400">—</span>}
+                      </td>
+                      {employees.map((e,ei)=> {
+                        const v = (data[d]&&data[d][e])||'';
+                        const bg = shiftColors[v] || undefined;
+                        return (
+                          <td key={e} className="py-1.5 px-3">
+                            <div className="cell-wrap">
+                              <input list="shift-options" id={`cell-${di}-${ei}`} className="cell border rounded-lg px-2 py-1.5 focus:ring-2 focus:ring-indigo-300 focus:outline-none transition disabled:bg-gray-100"
+                                style={{ backgroundColor: bg }} value={v}
+                                disabled={editingLocked}
+                                title={editingLocked? '执行中：只读' : ''}
+                                onFocus={()=>onFocusCell(di,ei)} onKeyDown={(ev)=> onKeyDownCell(ev, di, ei)}
+                                onCompositionStart={(ev)=>{ ev.target.isComposing = true; }}
+                                onCompositionEnd={(ev)=>{ ev.target.isComposing = false; setCellByIndex(di, ei, ev.currentTarget.value); }}
+                                onChange={ev=> setCellByIndex(di, ei, ev.target.value)} onDoubleClick={(ev)=>{ if(editingLocked) return; openPickerAt(di, ei, ev.currentTarget); }} placeholder="白/中1/中2/夜/休 或留空" />
+                              <button className="cell-toggle" disabled={editingLocked} aria-label="选择班次" title="选择班次"
+                                onClick={(ev)=>{ ev.preventDefault(); ev.stopPropagation(); openPickerAt(di, ei); }}>
+                                <span className="sr-only">打开班次选择器</span>
+                              </button>
+                            </div>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            <datalist id="shift-options">
+              {SHIFT_TYPES.map(s=> <option key={s} value={s} />)}
+            </datalist>
+          </div>
+        </>
+      )}
+    </Section>
+  );
+
+  function EmployeeChecklist(){
+    const [kw, setKw] = useState('');
+    const filtered = useMemo(()=>{ const k = kw.trim().toLowerCase(); return k ? employees.filter(e=> e.toLowerCase().includes(k)) : employees; }, [kw, employees]);
+    const listRef = useRef(null);
+    const withStay = (cb)=>{ const el=listRef.current; const st=el?el.scrollTop:0; const sl=el?el.scrollLeft:0; cb(); requestAnimationFrame(()=>{ const node=listRef.current; if(node){ node.scrollTop = st; node.scrollLeft = sl; } }); };
+    const selectedCount = filtered.filter(n=> !!batchChecked[n]).length;
+    const allSelected = filtered.length>0 && selectedCount===filtered.length;
+    return (
+      <div className="border rounded-xl p-3">
+        <input className="border rounded px-2 py-1 text-sm w-full mb-2" placeholder="搜索姓名…" value={kw} onChange={e=>setKw(e.target.value)} />
+        <div className="flex items-center justify-between text-xs text-gray-600 mb-2">
+          <div>当前筛选：{filtered.length} 人；已选 {selectedCount} 人</div>
+          <div className="space-x-2">
+            <button className={`px-2 py-1 rounded border ${editingLocked?'opacity-50 cursor-not-allowed':''}`} disabled={editingLocked} onClick={()=> withStay(()=>{ const next={...batchChecked}; filtered.forEach(n=> next[n]=true); setBatchChecked(next); })}>全选</button>
+            <button className={`px-2 py-1 rounded border ${editingLocked?'opacity-50 cursor-not-allowed':''}`} disabled={editingLocked} onClick={()=> withStay(()=> setBatchChecked(prev=>{ const next={...prev}; filtered.forEach(n=> next[n]=!prev[n]); return next; }))}>反选</button>
+            <button className={`px-2 py-1 rounded border ${editingLocked?'opacity-50 cursor-not-allowed':''}`} disabled={editingLocked} onClick={()=> withStay(()=> setBatchChecked(prev=>{ const next={...prev}; filtered.forEach(n=> { next[n]=false; }); return next; }))}>清空</button>
+          </div>
+        </div>
+        <div ref={listRef} className="max-h-64 overflow-auto divide-y">
+          {filtered.map(name=> (
+            <label key={name} className="flex items-center gap-2 py-1">
+              <input type="checkbox" disabled={editingLocked} checked={!!batchChecked[name]} onChange={()=> withStay(()=> setBatchChecked(p=>({ ...p, [name]: !p[name] })))} />
+              <span className="text-sm">{name}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  function AlbumEmployeeChecklist(){
+    const [kw, setKw] = useState('');
+    const filtered = useMemo(()=>{ const k = kw.trim().toLowerCase(); return k? employees.filter(e=> e.toLowerCase().includes(k)) : employees; }, [kw, employees]);
+    const listRef = useRef(null);
+    const withStay = (cb)=>{ const el=listRef.current; const st=el?el.scrollTop:0; const sl=el?el.scrollLeft:0; cb(); requestAnimationFrame(()=>{ const node=listRef.current; if(node){ node.scrollTop = st; node.scrollLeft = sl; } }); };
+    const selectedCount = filtered.filter(name=> !!albumSelected[name]).length;
+    return (
+      <div className="rounded-2xl border bg-gradient-to-br from-white via-white to-indigo-50/40 p-3">
+        <div className="flex items-center gap-2 mb-2">
+          <input className="border rounded px-2 py-1 text-sm flex-1" placeholder="搜索姓名…" value={kw} onChange={e=> setKw(e.target.value)} />
+          <span className="text-xs text-gray-500 whitespace-nowrap">已选 {albumCheckedList.length} / {employees.length}</span>
+        </div>
+        <div className="flex items-center justify-between text-xs text-gray-600 mb-2">
+          <div>当前筛选：{filtered.length} 人；选中 {selectedCount} 人</div>
+          <div className="space-x-1">
+            <button className={`px-2 py-1 rounded border text-xs ${editingLocked?'opacity-50 cursor-not-allowed':''}`} disabled={editingLocked} onClick={()=> withStay(()=>{ const next={...albumSelected}; filtered.forEach(n=> next[n]=true); setAlbumSelected(next); })}>全选</button>
+            <button className={`px-2 py-1 rounded border text-xs ${editingLocked?'opacity-50 cursor-not-allowed':''}`} disabled={editingLocked || filtered.length===0} onClick={()=> withStay(()=> setAlbumSelected(prev=>{ const next={...prev}; filtered.forEach(n=>{ next[n] = !prev[n]; }); return next; }))}>反选</button>
+            <button className={`px-2 py-1 rounded border text-xs ${editingLocked?'opacity-50 cursor-not-allowed':''}`} disabled={editingLocked || filtered.length===0} onClick={()=> withStay(()=> setAlbumSelected(prev=>{ const next={...prev}; filtered.forEach(n=>{ next[n] = false; }); return next; }))}>清空</button>
+          </div>
+        </div>
+        <div ref={listRef} className="max-h-64 overflow-auto divide-y">
+          {filtered.map(name=> (
+            <label key={name} className="flex items-center gap-2 py-1 text-sm">
+              <input type="checkbox" checked={!!albumSelected[name]} disabled={editingLocked} onChange={()=> withStay(()=> setAlbumSelected(prev=> ({ ...prev, [name]: !prev[name] })))} />
+              <span>{name}</span>
+            </label>
+          ))}
+          {filtered.length===0 && <div className="text-xs text-gray-400 py-3 text-center">未找到匹配人员</div>}
+        </div>
+        <div className="mt-3 text-xs text-gray-500 bg-indigo-50/50 rounded-xl px-3 py-2">
+          勾选后的人员将参与专辑审核排班与统计；未选择偏好时不会进入预测与自动分配。
+        </div>
+      </div>
+    );
+  }
+
+  function MainRulePanel(){
+    async function runMainRule(){
+      const targets = checkedList.length? checkedList : employees;
+      if(targets.length===0){ alert('请先勾选人员'); return; }
+
+      const prioritizedTargets = sortedByHistory(targets, historyProfile);
+
+      setStage('阶段 1/6：拉齐白班（5白+2休）', 10, 100);
+      let cur = buildWhiteFiveTwo({ employees: prioritizedTargets, data, start, end, restPrefs });
+      setData(cur); await new Promise(r=>setTimeout(r, 20));
+
+      setStage('阶段 2/6：按周期交替错开放中班', 30, 100);
+      cur = applyAlternateByCycle({ employees: prioritizedTargets, data: cur, start, end }, mixMax);
+      setData(cur); await new Promise(r=>setTimeout(r, 20));
+
+      setStage('阶段 3/6：按天比例收敛', 55, 100);
+      cur = clampDailyByRange({ employees: prioritizedTargets, data: cur, start, end, rMin, rMax, maxRounds: 300, mixMaxRatio: mixMax });
+      setData(cur); await new Promise(r=>setTimeout(r, 20));
+
+      setStage('阶段 4/6：个人比例收敛', 78, 100);
+      for(let sweep=0; sweep<8; sweep++){
+        cur = clampDailyByRange({ employees: prioritizedTargets, data: cur, start, end, rMin, rMax, maxRounds: 220, mixMaxRatio: mixMax });
+        cur = clampPersonByRange({ employees: prioritizedTargets, data: cur, start, end, pMin, pMax, maxRounds: 260, mixMaxRatio: mixMax });
+        pushLog(`循环微调：第 ${sweep+1} 轮`);
+      }
+      setData(cur); await new Promise(r=>setTimeout(r, 20));
+
+      setStage('阶段 5/6：参考历史与行政天数调整', 92, 100);
+      cur = adjustWithHistory({ data: cur, employees: prioritizedTargets, start, end, adminDays, historyProfile, mixMaxRatio: mixMax, yearlyOptimize });
+      setData(cur); await new Promise(r=>setTimeout(r, 20));
+
+      setStage('阶段 6/6：校验并微调', 98, 100);
+      cur = repairNoMidToWhite({ data: cur, employees: prioritizedTargets, start, end });
+      setData(cur);
+
+      endStage();
+    }
+
+    return (
+      <div className="bg-white rounded-xl border p-3 space-y-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+          <div className="space-y-2">
+            <div className="font-medium text-gray-700">每日比例（中1:白）</div>
+            <div className="flex items-center gap-2">
+              <span>1 :</span>
+              <input type="number" step="0.05" min="0" max="3" className="w-24 border rounded px-2 py-1" value={rMin} onChange={(e)=> setRMin(Math.max(0, Math.min(3, parseFloat(e.target.value||'0'))))} />
+              <span>~</span>
+              <input type="number" step="0.05" min="0" max="3" className="w-24 border rounded px-2 py-1" value={rMax} onChange={(e)=> setRMax(Math.max(0, Math.min(3, parseFloat(e.target.value||'0'))))} />
+              <span className="text-gray-400">（示例：1:0.4~0.6）</span>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <div className="font-medium text-gray-700">个人比例（中1:白）</div>
+            <div className="flex items-center gap-2">
+              <span>1 :</span>
+              <input type="number" step="0.05" min="0" max="3" className="w-24 border rounded px-2 py-1" value={pMin} onChange={(e)=> setPMin(Math.max(0, Math.min(3, parseFloat(e.target.value||'0'))))} />
+              <span>~</span>
+              <input type="number" step="0.05" min="0" max="3" className="w-24 border rounded px-2 py-1" value={pMax} onChange={(e)=> setPMax(Math.max(0, Math.min(3, parseFloat(e.target.value||'0'))))} />
+              <span className="text-gray-400">（示例：1:0.4~0.6）</span>
+            </div>
+          </div>
+        </div>
+        <div className="space-y-2">
+          <div className="font-medium text-gray-700">混合周期上限（比例）</div>
+          <div className="flex items-center gap-2 text-sm">
+            <span>混合周期 ≤ 总周期 ×</span>
+            <input type="number" step="0.05" min="0" max="1" className="w-24 border rounded px-2 py-1" value={mixMax} onChange={(e)=> setMixMax(Math.max(0, Math.min(1, parseFloat(e.target.value||'0'))))} />
+            <span className="text-gray-400">（例如：0.5 表示有白且有中的周期不超过一半）</span>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <PillBtn color="indigo" onClick={runMainRule} disabled={prog.running}>开始自动排班</PillBtn>
+        </div>
+
+        <div className="text-xs text-gray-500">规则说明：① 全程禁止生成“中1→白”相邻；② 严格遵守最多 6 天连续上班；③ 混合周期（白+中1 同在一周期）不超过设定比例；④ 夜/中2 不参与本算法但保留；⑤ 多轮“按天→按人”收敛，优先确保你的目标约束而非速度。</div>
+      </div>
+    );
+  }
+
+  function NightPanel(){
+    return (
+      <div className="bg-white rounded-xl border p-3">
+        <h4 className="font-medium mb-2">夜班窗口（每天尽量有 夜 + 中2）</h4>
+        <div className="space-y-2">
+          {nightWindows.map((w,i)=> (
+            <div key={i} className="flex flex-wrap items-end gap-2">
+              <label className="text-sm">开始 <input type="date" value={w.s} onChange={e=> setNightWindows(arr=>{ const a=[...arr]; a[i]={...a[i], s:e.target.value}; return a; })} className="border rounded px-2 py-1 ml-1"/></label>
+              <label className="text-sm">结束 <input type="date" value={w.e} onChange={e=> setNightWindows(arr=>{ const a=[...arr]; a[i]={...a[i], e:e.target.value}; return a; })} className="border rounded px-2 py-1 ml-1"/></label>
+              <button className="px-2 py-1 border rounded" onClick={()=> setNightWindows(arr=> arr.filter((_,idx)=> idx!==i))}>删除</button>
+            </div>
+          ))}
+          <button className="px-3 py-1.5 border rounded" onClick={()=> setNightWindows(a=> [...a, {s:start,e:end}])}>新增一段</button>
+        </div>
+
+        <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+          <label className="inline-flex items-center gap-2"><input type="checkbox" checked={nightOverride} onChange={e=> setNightOverride(e.target.checked)} /> 应用夜/中2时允许覆盖现有班次</label>
+          <label className="inline-flex items-center gap-2"><input type="checkbox" checked={nightRules.prioritizeInterval} onChange={e=> setNightRules(r=>({...r, prioritizeInterval:e.target.checked}))}/> 夜班按间隔优先分配</label>
+          <label className="inline-flex items-center gap-2"><input type="checkbox" checked={nightRules.restAfterNight} onChange={e=> setNightRules(r=>({...r, restAfterNight:e.target.checked}))}/> 夜班后休息 2 天</label>
+          <label className="inline-flex items-center gap-2"><input type="checkbox" checked={nightRules.enforceRestCap} onChange={e=> setNightRules(r=>({...r, enforceRestCap:e.target.checked}))}/> 夜后休息不超过 2 天</label>
+          <label className="inline-flex items-center gap-2"><input type="checkbox" checked={nightRules.restAfterMid2} onChange={e=> setNightRules(r=>({...r, restAfterMid2:e.target.checked}))}/> 中2 后休息 2 天</label>
+          <label className="inline-flex items-center gap-2"><input type="checkbox" checked={nightRules.allowDoubleMid2} onChange={e=> setNightRules(r=>({...r, allowDoubleMid2:e.target.checked}))}/> 允许连续 2 个中2</label>
+          <label className="inline-flex items-center gap-2"><input type="checkbox" checked={nightRules.allowNightDay4} onChange={e=> setNightRules(r=>({...r, allowNightDay4:e.target.checked}))}/> 支持周期第 4 天排夜班</label>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3 mt-3 text-sm">
+          <PillBtn color="emerald" onClick={()=>{
+            if(checkedList.length===0){ alert('请先勾选人员'); return; }
+            let newD={...data};
+            for(const w of nightWindows){ if(!w.s||!w.e) continue; newD = autoAssignNightAndM2({ employees: checkedList, data:newD, start:w.s, end:w.e, override: nightOverride, nightRules, restPrefs }); }
+            setData(newD);
+          }}>AI 一键分配 夜/中2（按窗口，多段）</PillBtn>
+          <span className="text-xs text-gray-500">规则：夜后两天必须休；夜后两天禁止该员工中2；中2后一天强制休。</span>
+        </div>
+      </div>
+    );
+  }
+
+  const ViewBatch = (
+    <Section title="自动分配班次" right={editingLocked? <span className='text-rose-600 text-sm inline-flex items-center gap-1'><Icon name='lock'/>执行中：只读浏览</span>: null}>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
+        <div className="lg:col-span-1"><h3 className="font-medium mb-2">选择人员</h3><EmployeeChecklist/></div>
+        <div className="lg:col-span-2 space-y-4"><MainRulePanel/><NightPanel/></div>
+      </div>
+    </Section>
+  );
+
+  const albumRange = useMemo(()=>{
+    const spanStart = monthKeyToSpan(albumRangeStartMonth);
+    const spanEnd = monthKeyToSpan(albumRangeEndMonth);
+    if(!spanStart || !spanEnd) return null;
+    let s = spanStart.start;
+    let e = spanEnd.end;
+    if(s > e){ const tmp = s; s = spanEnd.start; e = spanStart.end; }
+    const clipStart = s < start ? start : s;
+    const clipEnd = e > end ? end : e;
+    if(clipStart > clipEnd) return null;
+    return { start: clipStart, end: clipEnd };
+  }, [albumRangeStartMonth, albumRangeEndMonth, start, end]);
+  const albumDates = useMemo(()=> albumRange? enumerateDates(albumRange.start, albumRange.end) : [], [albumRange]);
+
+  useEffect(()=>{
+    if(albumDates.length===0){
+      setAlbumAssignments(prev=> Object.keys(prev||{}).length? {} : prev);
+      return;
+    }
+    setAlbumAssignments(prev=>{
+      const set = new Set(albumDates);
+      let changed = false;
+      const next = {};
+      albumDates.forEach(d=>{
+        if(prev && prev[d]){
+          next[d] = prev[d];
+        } else {
+          next[d] = { white:'', mid:'' };
+          changed = true;
+        }
+      });
+      if(prev){
+        for(const key of Object.keys(prev)){
+          if(!set.has(key)){
+            changed = true;
+            break;
+          }
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [albumDates]);
+
+  useEffect(()=>{
+    if(albumCheckedList.length===0){
+      setAlbumAssignments(prev=>{
+        if(!prev || Object.keys(prev).length===0) return prev;
+        const cleared={};
+        Object.keys(prev).forEach(day=>{ cleared[day] = { white:'', mid:'' }; });
+        return cleared;
+      });
+      return;
+    }
+    setAlbumAssignments(prev=>{
+      if(!prev) return prev;
+      const sel = new Set(albumCheckedList);
+      let changed = false;
+      const next = {};
+      Object.entries(prev).forEach(([day, info])=>{
+        const safe = info || { white:'', mid:'' };
+        const white = sel.has(safe.white) ? safe.white : '';
+        const mid = sel.has(safe.mid) ? safe.mid : '';
+        if(white!==safe.white || mid!==safe.mid) changed = true;
+        next[day] = { white, mid };
+      });
+      return changed ? next : prev;
+    });
+  }, [albumCheckedList]);
+
+  useEffect(()=>{
+    if(albumCheckedList.length===0 || albumDates.length===0){
+      setAlbumAutoNote('');
+    }
+  }, [albumCheckedList, albumDates]);
+
+  const albumWhiteHourValue = Number(albumWhiteHour) || 0;
+  const albumMidHourValue = Number(albumMidHour) || 0;
+  const albumStats = useMemo(()=>{
+    const base = {};
+    albumCheckedList.forEach(emp=>{
+      base[emp] = { whiteDays:0, midDays:0, whiteHours:0, midHours:0, totalHours:0 };
+    });
+    albumDates.forEach(day=>{
+      const info = albumAssignments[day] || {};
+      if(info.white && base[info.white]){
+        base[info.white].whiteDays += 1;
+        base[info.white].whiteHours += albumWhiteHourValue;
+        base[info.white].totalHours += albumWhiteHourValue;
+      }
+      if(info.mid && base[info.mid]){
+        base[info.mid].midDays += 1;
+        base[info.mid].midHours += albumMidHourValue;
+        base[info.mid].totalHours += albumMidHourValue;
+      }
+    });
+    return albumCheckedList.map(emp=> ({ emp, ...base[emp] }));
+  }, [albumAssignments, albumDates, albumCheckedList, albumWhiteHourValue, albumMidHourValue]);
+  const albumTotals = useMemo(()=> albumStats.reduce((acc,row)=>{
+    acc.whiteDays += row.whiteDays;
+    acc.midDays += row.midDays;
+    acc.whiteHours += row.whiteHours;
+    acc.midHours += row.midHours;
+    acc.totalHours += row.totalHours;
+    return acc;
+  }, { whiteDays:0, midDays:0, whiteHours:0, midHours:0, totalHours:0 }), [albumStats]);
+  const albumDiff = useMemo(()=>{
+    if(albumStats.length===0) return 0;
+    const totals = albumStats.map(r=> r.totalHours);
+    return totals.length? Math.max(...totals) - Math.min(...totals) : 0;
+  }, [albumStats]);
+  const albumCoverage = useMemo(()=>{
+    const totalDays = albumDates.length;
+    let whiteAssigned = 0;
+    let midAssigned = 0;
+    albumDates.forEach(day=>{
+      const info = albumAssignments[day] || {};
+      if(info.white) whiteAssigned += 1;
+      if(info.mid) midAssigned += 1;
+    });
+    return { totalDays, whiteAssigned, midAssigned };
+  }, [albumDates, albumAssignments]);
+
+  const exportAlbumPlan = ()=>{
+    if(albumDates.length===0){
+      alert('暂无可导出的专辑审核排班数据');
+      return;
+    }
+    const escape = (val)=> String(val||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+    const headerHtml = '<tr><th>日期</th><th>星期</th><th>白班审核人</th><th>中班审核人</th></tr>';
+    const bodyHtml = albumDates.map(day=>{
+      const info = albumAssignments[day] || { white:'', mid:'' };
+      const weekLabel = '周' + WN[new Date(day).getDay()];
+      return `<tr><td>${escape(day)}</td><td>${escape(weekLabel)}</td><td>${escape(info.white||'')}</td><td>${escape(info.mid||'')}</td></tr>`;
+    }).join('');
+    const tableHtml = `<table>${headerHtml}${bodyHtml}</table>`;
+    const blob = new Blob(['\ufeff' + tableHtml], { type: 'application/vnd.ms-excel' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const rangeLabel = albumRange ? `_${albumRange.start}_${albumRange.end}` : '';
+    link.href = url;
+    link.download = `专辑审核排班表${rangeLabel}.xls`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(()=> URL.revokeObjectURL(url), 200);
+  };
+
+  const confirmAlbumPlan = ()=>{
+    if(editingLocked){ alert('执行中：请稍后再试'); return; }
+    if(!albumRange || albumDates.length===0){ alert('请先设置有效的月份范围并生成排班'); return; }
+    const snapshot = {};
+    albumDates.forEach(day=>{
+      const info = albumAssignments[day] || { white:'', mid:'' };
+      snapshot[day] = { white: info.white || '', mid: info.mid || '' };
+    });
+    const hasAny = Object.values(snapshot).some(info=> info.white || info.mid);
+    if(!hasAny && !confirm('当前排班表全部未分配，仍然确认并保存吗？')) return;
+    const existingIdx = albumHistory.findIndex(item=> item?.range?.start===albumRange.start && item?.range?.end===albumRange.end);
+    if(existingIdx>=0 && !confirm('该时间范围已存在确认排班，继续将覆盖历史记录，是否继续？')) return;
+    const entry = {
+      id: `album-${Date.now()}`,
+      savedAt: new Date().toISOString(),
+      range: { start: albumRange.start, end: albumRange.end },
+      assignments: snapshot,
+      whiteHour: albumWhiteHourValue,
+      midHour: albumMidHourValue,
+      totals: { ...albumTotals },
+      diff: albumDiff,
+      coverage: { ...albumCoverage }
+    };
+    setAlbumHistory(prev=>{
+      const next = existingIdx>=0 ? prev.filter((_,idx)=> idx!==existingIdx) : prev.slice();
+      return [entry, ...next];
+    });
+    setAlbumAutoNote('排班已确认并保存，可在统计视图查看历史与分析。');
+  };
+
+  const autoAssignAlbum = ()=>{
+    if(editingLocked){ alert('执行中：请稍后再试'); return; }
+    if(albumCheckedList.length===0){ alert('请先在左侧勾选参与专辑审核的人员'); return; }
+    if(albumDates.length===0){ alert('请先设置有效的月份范围，并确保与当前排班范围有交集'); return; }
+    const diffLimitRaw = Number(albumMaxDiff);
+    const diffLimit = Number.isFinite(diffLimitRaw) ? Math.max(0, diffLimitRaw) : Infinity;
+    const statsMap = {};
+    albumCheckedList.forEach(emp=>{ statsMap[emp] = { total:0, whiteHours:0, midHours:0, whiteDays:0, midDays:0 }; });
+    const plan = {};
+    let usedFallback = false;
+    let missingCandidate = false;
+    const chooseCandidate = (candidates, type, hourValue)=>{
+      if(candidates.length===0){ missingCandidate = true; return ''; }
+      const sorted = [...candidates].sort((a,b)=>{
+        if(statsMap[a].total !== statsMap[b].total) return statsMap[a].total - statsMap[b].total;
+        if(type==='white' && statsMap[a].whiteDays !== statsMap[b].whiteDays) return statsMap[a].whiteDays - statsMap[b].whiteDays;
+        if(type==='mid' && statsMap[a].midDays !== statsMap[b].midDays) return statsMap[a].midDays - statsMap[b].midDays;
+        return a.localeCompare(b, 'zh-CN');
+      });
+      const feasible = sorted.filter(emp=>{
+        if(diffLimit===Infinity) return true;
+        const totals = albumCheckedList.map(name=> name===emp ? statsMap[name].total + hourValue : statsMap[name].total);
+        const maxVal = Math.max(...totals);
+        const minVal = Math.min(...totals);
+        return (maxVal - minVal) <= diffLimit + 1e-9;
+      });
+      const pick = feasible.length? feasible[0] : sorted[0];
+      if(!feasible.length && diffLimit!==Infinity) usedFallback = true;
+      statsMap[pick].total += hourValue;
+      if(type==='white'){ statsMap[pick].whiteHours += hourValue; statsMap[pick].whiteDays += 1; }
+      if(type==='mid'){ statsMap[pick].midHours += hourValue; statsMap[pick].midDays += 1; }
+      return pick;
+    };
+    albumDates.forEach(day=>{
+      const row = data[day] || {};
+      const whiteCandidates = albumCheckedList.filter(emp=> row[emp]==='白');
+      const midCandidates = albumCheckedList.filter(emp=> row[emp]==='中1');
+      const white = chooseCandidate(whiteCandidates, 'white', albumWhiteHourValue);
+      const mid = chooseCandidate(midCandidates, 'mid', albumMidHourValue);
+      plan[day] = { white: white||'', mid: mid||'' };
+    });
+    setAlbumAssignments(plan);
+    if(missingCandidate){
+      setAlbumAutoNote('部分日期缺少符合条件的白班或中1人员，请检查并手动补充。');
+    } else if(usedFallback){
+      setAlbumAutoNote('已尽量平均分配，但存在超出差值限制的情况，请复核。');
+    } else {
+      setAlbumAutoNote('自动生成完成，可继续手动微调，统计实时更新。');
+    }
+  };
+
+  const updateAlbumAssignment = (day, field, value)=>{
+    setAlbumAssignments(prev=> ({
+      ...prev,
+      [day]: { ...(prev?.[day]||{ white:'', mid:'' }), [field]: value }
+    }));
+    setAlbumAutoNote('排班已更新，右侧统计已同步。');
+  };
+
+  const ViewAlbum = (
+    <Section title="专辑审核自动排班" right={<span className="text-xs text-gray-500">白班 1 人 + 中1 1 人，时长均衡的审核计划</span>}>
+      <div className="grid grid-cols-1 xl:grid-cols-4 gap-4 items-start">
+        <div className="space-y-4">
+          <AlbumEmployeeChecklist/>
+          <div className="rounded-2xl border bg-gradient-to-br from-white via-white to-amber-50/60 p-4 space-y-3">
+            <div className="flex items-center gap-2 text-sm font-medium text-amber-700"><Icon name="magic" className="w-4 h-4"/>自动排班参数</div>
+            <div className="grid grid-cols-1 gap-2 text-sm text-gray-600">
+              <label className="flex items-center justify-between gap-2">开始月份<MonthInput className="border rounded px-2 py-1" value={albumRangeStartMonth} onChange={setAlbumRangeStartMonth} disabled={editingLocked} /></label>
+              <label className="flex items-center justify-between gap-2">结束月份<MonthInput className="border rounded px-2 py-1" value={albumRangeEndMonth} onChange={setAlbumRangeEndMonth} disabled={editingLocked} /></label>
+              <label className="flex items-center justify-between gap-2">白班时长（小时）<input type="number" step="0.01" min="0" className="border rounded px-2 py-1 w-24 text-right" value={albumWhiteHour}
+                onChange={e=> setAlbumWhiteHour(Number.parseFloat(e.target.value||'0')||0)} /></label>
+              <label className="flex items-center justify-between gap-2">中1时长（小时）<input type="number" step="0.01" min="0" className="border rounded px-2 py-1 w-24 text-right" value={albumMidHour}
+                onChange={e=> setAlbumMidHour(Number.parseFloat(e.target.value||'0')||0)} /></label>
+              <label className="flex items-center justify-between gap-2">允许时长差值 ±<input type="number" step="0.01" min="0" className="border rounded px-2 py-1 w-24 text-right" value={albumMaxDiff}
+                onChange={e=> setAlbumMaxDiff(e.target.value===''?0:Number.parseFloat(e.target.value)||0)} /></label>
+            </div>
+            <PillBtn color="indigo" onClick={autoAssignAlbum} disabled={editingLocked || albumCheckedList.length===0 || albumDates.length===0} title={albumCheckedList.length===0? '请先勾选人员': albumDates.length===0? '请先设置有效月份范围': (editingLocked?'执行中：只读':'' )}>智能生成专辑审核排班</PillBtn>
+            {albumAutoNote && <div className="text-xs text-indigo-600 bg-indigo-50/80 border border-indigo-100 rounded-xl px-3 py-2">{albumAutoNote}</div>}
+            <div className="text-xs text-gray-500">提示：参数调整后可重新生成；排班结果支持右侧表格内手动微调。</div>
+          </div>
+        </div>
+
+        <div className="space-y-4 xl:col-span-3">
+          <div className="rounded-2xl border bg-white/90 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-sm font-medium text-gray-700">
+              <div className="flex items-center gap-2">
+                <span>排班概览</span>
+                <span className="text-xs text-gray-400">{albumRange? `${albumRange.start} ~ ${albumRange.end}` : '请选择排班月份范围'}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <PillBtn color="emerald" onClick={confirmAlbumPlan} disabled={editingLocked || !albumRange || albumDates.length===0} title={editingLocked? '执行中：只读': (!albumRange || albumDates.length===0 ? '请先设置有效的月份范围' : '确认排班并写入历史')}>确认排班</PillBtn>
+                <PillBtn color="gray" onClick={exportAlbumPlan} disabled={albumDates.length===0} title={albumDates.length===0 ? '暂无可导出的排班数据' : '导出为 Excel'}>导出 Excel</PillBtn>
+              </div>
+            </div>
+            {albumRange ? (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-3 text-sm">
+                <div className="rounded-2xl border bg-gradient-to-br from-indigo-50 to-white px-3 py-2">
+                  <div className="text-xs text-gray-500">覆盖天数</div>
+                  <div className="text-lg font-semibold text-indigo-700">{albumCoverage.totalDays}</div>
+                </div>
+                <div className="rounded-2xl border bg-gradient-to-br from-sky-50 to-white px-3 py-2">
+                  <div className="text-xs text-gray-500">白班已分配</div>
+                  <div className="text-lg font-semibold text-sky-600">{albumCoverage.whiteAssigned}<span className="text-xs text-gray-500 ml-1">天</span></div>
+                </div>
+                <div className="rounded-2xl border bg-gradient-to-br from-amber-50 to-white px-3 py-2">
+                  <div className="text-xs text-gray-500">中1已分配</div>
+                  <div className="text-lg font-semibold text-amber-600">{albumCoverage.midAssigned}<span className="text-xs text-gray-500 ml-1">天</span></div>
+                </div>
+                <div className="rounded-2xl border bg-gradient-to-br from-emerald-50 to-white px-3 py-2">
+                  <div className="text-xs text-gray-500">时长差值</div>
+                  <div className={`text-lg font-semibold ${albumDiff <= (Number.isFinite(albumMaxDiff)? Math.max(0, albumMaxDiff) : albumDiff+1) ? 'text-emerald-600':'text-rose-600'}`}>{albumDiff.toFixed(2)}<span className="text-xs text-gray-500 ml-1">小时</span></div>
+                </div>
+              </div>
+            ) : (
+              <div className="text-xs text-gray-500 mt-3">尚未设置有效范围，请在左侧选择月份。</div>
+            )}
+          </div>
+
+          <div className="rounded-2xl border bg-white overflow-hidden">
+            <div className="px-4 py-3 border-b bg-gray-50 text-sm font-medium text-gray-700 flex items-center justify-between">
+              <span>播单专辑审核排班表</span>
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-gray-400">支持手动微调，实时更新统计</span>
+                <button onClick={exportAlbumPlan} disabled={albumDates.length===0}
+                  className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${albumDates.length===0 ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-indigo-600 text-white hover:bg-indigo-500'}`}>
+                  导出 Excel
+                </button>
+              </div>
+            </div>
+            {albumDates.length===0 ? (
+              <div className="p-4 text-xs text-gray-500">请选择有效月份后再生成排班。</div>
+            ) : (
+              <div className="overflow-auto">
+                <table className="min-w-[520px] w-full text-sm">
+                  <thead className="bg-gray-50 text-gray-500">
+                    <tr>
+                      <th className="text-left py-2 px-3">日期</th>
+                      <th className="text-left py-2 px-3">星期</th>
+                      <th className="text-left py-2 px-3">白班审核人</th>
+                      <th className="text-left py-2 px-3">中班审核人</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {albumDates.map(day=>{
+                      const info = albumAssignments[day] || { white:'', mid:'' };
+                      const row = data[day] || {};
+                      const weekLabel = WN[new Date(day).getDay()];
+                      const whiteCandidates = albumCheckedList.filter(emp=> (row[emp]||'')==='白');
+                      const midCandidates = albumCheckedList.filter(emp=> (row[emp]||'')==='中1');
+                      const whiteClass = `border rounded px-2 py-1 w-full text-sm transition-colors ${info.white ? 'bg-white border-gray-200 text-gray-700' : 'bg-rose-50 border-rose-200 text-rose-600'}`;
+                      const midClass = `border rounded px-2 py-1 w-full text-sm transition-colors ${info.mid ? 'bg-white border-gray-200 text-gray-700' : 'bg-rose-50 border-rose-200 text-rose-600'}`;
+                      return (
+                        <tr key={`album-${day}`} className="border-t hover:bg-indigo-50/20">
+                          <td className="py-1.5 px-3 font-medium text-gray-700">{day}</td>
+                          <td className="py-1.5 px-3 text-gray-500">周{weekLabel}</td>
+                          <td className="py-1.5 px-3">
+                            <select
+                              className={whiteClass}
+                              value={info.white || ''}
+                              onChange={e=> updateAlbumAssignment(day, 'white', e.target.value)}
+                              title={whiteCandidates.length===0 ? '当日无白班可选' : '请选择白班审核人'}
+                            >
+                              <option value="">未分配</option>
+                              {whiteCandidates.map(emp=> (
+                                <option key={`${day}-${emp}-white`} value={emp}>{emp}</option>
+                              ))}
+                            </select>
+                          </td>
+                          <td className="py-1.5 px-3">
+                            <select
+                              className={midClass}
+                              value={info.mid || ''}
+                              onChange={e=> updateAlbumAssignment(day, 'mid', e.target.value)}
+                              title={midCandidates.length===0 ? '当日无中1可选' : '请选择中班审核人'}
+                            >
+                              <option value="">未分配</option>
+                              {midCandidates.map(emp=> (
+                                <option key={`${day}-${emp}-mid`} value={emp}>{emp}</option>
+                              ))}
+                            </select>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-2xl border bg-white overflow-hidden">
+            <div className="px-4 py-3 border-b bg-gray-50 text-sm font-medium text-gray-700 flex items-center justify-between">
+              <span>筛选范围内班次预览</span>
+              <span className="text-xs text-gray-400">仅显示已勾选人员</span>
+            </div>
+            {albumDates.length===0 || albumCheckedList.length===0 ? (
+              <div className="p-4 text-xs text-gray-500">请选择人员并确保月份范围与当前排班有交集。</div>
+            ) : (
+              <div className="overflow-auto">
+                <table className="min-w-[620px] w-full text-sm">
+                  <thead className="bg-gray-50 text-gray-500">
+                    <tr>
+                      <th className="text-left py-2 px-3">日期</th>
+                      <th className="text-left py-2 px-3">星期</th>
+                      {albumCheckedList.map(emp=> <th key={emp} className="text-left py-2 px-3">{emp}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {albumDates.map(day=>{
+                      const wk = WN[new Date(day).getDay()];
+                      return (
+                        <tr key={`preview-${day}`} className="border-t hover:bg-gray-50">
+                          <td className="py-1.5 px-3 font-medium text-gray-700">{day}</td>
+                          <td className="py-1.5 px-3 text-gray-500">周{wk}</td>
+                          {albumCheckedList.map(emp=>{
+                            const shift = (data[day]||{})[emp] || '';
+                            const bg = shiftColors[shift] || '#f9fafb';
+                            return (
+                              <td key={`${day}-${emp}`} className="py-1.5 px-3">
+                                <span className="px-2 py-1 rounded-full text-xs" style={{ backgroundColor: bg }}>{shift || '—'}</span>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-2xl border bg-white overflow-hidden">
+            <div className="px-4 py-3 border-b bg-gray-50 text-sm font-medium text-gray-700 flex items-center justify-between">
+              <span>人员审核时长统计</span>
+              <span className="text-xs text-gray-400">实时对齐白班/中班天数与小时</span>
+            </div>
+            {albumCheckedList.length===0 ? (
+              <div className="p-4 text-xs text-gray-500">尚未勾选专辑审核人员。</div>
+            ) : (
+              <div className="overflow-auto">
+                <table className="min-w-[600px] w-full text-sm">
+                  <thead className="bg-gray-50 text-gray-500">
+                    <tr>
+                      <th className="text-left py-2 px-3">人员</th>
+                      <th className="text-right py-2 px-3">白班天数</th>
+                      <th className="text-right py-2 px-3">白班时长</th>
+                      <th className="text-right py-2 px-3">中班天数</th>
+                      <th className="text-right py-2 px-3">中班时长</th>
+                      <th className="text-right py-2 px-3">总时长</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {albumStats.map(row=> (
+                      <tr key={`stat-${row.emp}`} className="border-t hover:bg-gray-50">
+                        <td className="py-1.5 px-3 text-gray-700">{row.emp}</td>
+                        <td className="py-1.5 px-3 text-right">{row.whiteDays}</td>
+                        <td className="py-1.5 px-3 text-right">{row.whiteHours.toFixed(2)}</td>
+                        <td className="py-1.5 px-3 text-right">{row.midDays}</td>
+                        <td className="py-1.5 px-3 text-right">{row.midHours.toFixed(2)}</td>
+                        <td className="py-1.5 px-3 text-right font-medium">{row.totalHours.toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="bg-indigo-50/60 text-sm">
+                    <tr>
+                      <td className="py-2 px-3 font-medium text-gray-700">合计</td>
+                      <td className="py-2 px-3 text-right font-medium">{albumTotals.whiteDays}</td>
+                      <td className="py-2 px-3 text-right font-medium">{albumTotals.whiteHours.toFixed(2)}</td>
+                      <td className="py-2 px-3 text-right font-medium">{albumTotals.midDays}</td>
+                      <td className="py-2 px-3 text-right font-medium">{albumTotals.midHours.toFixed(2)}</td>
+                      <td className="py-2 px-3 text-right font-semibold text-indigo-700">{albumTotals.totalHours.toFixed(2)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </Section>
+  );
+
+  const [empInput, setEmpInput] = useState('');
+  const restForecast = useMemo(()=>{
+    const base = {1:0,2:0,3:0,4:0,5:0,6:0,7:0};
+    employees.forEach(emp=>{
+      const pref = restPrefs[emp];
+      if(!pref) return;
+      const restDays = pairToSet(pref);
+      for(let w=1; w<=7; w++){
+        if(!restDays.has(w)) base[w]+=1;
+      }
+    });
+    return base;
+  }, [employees, restPrefs]);
+  const hasRestForecast = useMemo(()=> employees.some(emp=> !!restPrefs[emp]), [employees, restPrefs]);
+  const ViewEmployees = (
+    <Section title="员工管理" right={<span className="text-sm text-gray-500">休息偏好保存在服务器与本地（跨视图持久）</span>}>
+      <div className="grid grid-cols-1">
+        <div className="mb-6">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-sm font-medium text-gray-700">周一至周日在岗人数预测</h3>
+            <span className="text-xs text-gray-400">仅统计已选择休息偏好的人员</span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+            {['周一','周二','周三','周四','周五','周六','周日'].map((label,idx)=>{
+              const day = idx+1;
+              return (
+                <div key={label} className="rounded-2xl border bg-gradient-to-br from-white to-sky-50/60 p-3 text-center shadow-sm">
+                  <div className="text-xs text-gray-500">{label}</div>
+                  <div className="text-xl font-semibold text-sky-600">{restForecast[day] || 0}<span className="text-sm text-gray-500 ml-1">人</span></div>
+                </div>
+              );
+            })}
+          </div>
+          {!hasRestForecast && <div className="text-xs text-gray-500 mt-2">请选择休息偏好后即可实时看到在岗人数预测。</div>}
+        </div>
+        <div className="mb-4">
+          <label className="block text-sm text-gray-600 mb-1">批量添加（每行/逗号分隔）</label>
+          <div className="flex gap-2 items-start">
+            <textarea className="flex-1 border rounded px-3 py-2 h-24" value={empInput}
+              onCompositionStart={()=>{}}
+              onCompositionEnd={(e)=>{ setEmpInput(e.target.value); }}
+              onChange={e=>setEmpInput(e.target.value)} placeholder="张三\n李四" />
+            <PillBtn onClick={()=>{ empInput.split(/\n|,|\s+/).forEach(n=>{ const name=(n||'').trim(); if(name && !employees.includes(name)) setEmployees(prev=>[...prev, name]); }); setEmpInput(''); }} disabled={editingLocked} title={editingLocked?'执行中：只读':''}>添加</PillBtn>
+          </div>
+        </div>
+        <div className="overflow-auto">
+          <table className="text-sm min-w-[760px] w-full">
+            <thead>
+              <tr className="text-gray-500"><th className="text-left">姓名</th><th className="text-left">本次休息偏好</th><th className="text-left">操作</th></tr>
+            </thead>
+            <tbody>
+              {employees.map(e=> (
+                <tr key={e} className="border-t hover:bg-gray-50">
+                  <td className="py-1">{e}</td>
+                  <td className="py-1">
+                    <div className="flex items-center gap-2">
+                      {REST_PAIRS.map(p=> (
+                        <label key={p} className={`px-2 py-1 rounded border cursor-pointer ${restPrefs[e]===p? 'bg-indigo-50 border-indigo-300 text-indigo-700':'hover:bg-gray-50'} ${editingLocked?'opacity-60 cursor-not-allowed':''}`}>
+                          <input type="radio" name={`rest-${e}`} disabled={editingLocked} className="mr-1" checked={restPrefs[e]===p} onChange={()=> setRestPrefs(r=> ({...r, [e]: sanitizeRestPairValue(p)}))} /> 休{p}
+                        </label>
+                      ))}
+                      <button className={`px-2 py-1 rounded border ${editingLocked?'opacity-60 cursor-not-allowed':''}`} disabled={editingLocked} onClick={()=> setRestPrefs(r=>{ const x={...r}; delete x[e]; return x; })}>清除偏好</button>
+                    </div>
+                  </td>
+                  <td className="py-1"><button className={`text-red-600 ${editingLocked?'opacity-60 cursor-not-allowed':''}`} disabled={editingLocked} onClick={()=>{
+                    setEmployees(prev=> prev.filter(x=>x!==e));
+                    setData(prev=>{ const next={...prev}; for(const d of Object.keys(next)){ if(next[d] && (e in (next[d]||{}))){ const r={...next[d]}; delete r[e]; next[d]=r; } } return next; });
+                    setRestPrefs(r=>{ const x={...r}; delete x[e]; return x; });
+                  }}>删除</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="mt-3"><PillBtn color="emerald" onClick={saveToServer} disabled={editingLocked} title={editingLocked?'执行中：只读':''}>保存人员与偏好到服务器</PillBtn></div>
+      </div>
+    </Section>
+  );
+
+  function periodRanges(){
+    const dS=new Date(start);
+    const yS = fmt(new Date(dS.getFullYear(),0,1)); const yE = fmt(new Date(dS.getFullYear(),11,31));
+    const q = Math.floor(dS.getMonth()/3); const qS = fmt(new Date(dS.getFullYear(), q*3, 1)); const qE = fmt(new Date(dS.getFullYear(), q*3+3, 0));
+    const mS = fmt(new Date(dS.getFullYear(), dS.getMonth(), 1)); const mE = fmt(new Date(dS.getFullYear(), dS.getMonth()+1, 0));
+    return { y:{s:yS,e:yE}, q:{s:qS,e:qE}, m:{s:mS,e:mE}, r:{s:start,e:end} };
+  }
+  const ViewStats = (()=>{
+    const ranges = periodRanges();
+    const [statPeriod, setStatPeriod] = useState('r');
+    const [statView, setStatView] = useState('person');
+    const [showRestCounts, setShowRestCounts] = useState(true);
+    const [orderBy, setOrderBy] = useState('default');
+    const [albumStatMode, setAlbumStatMode] = useState('analysis');
+    const cur = statPeriod==='y'? ranges.y : statPeriod==='q'? ranges.q : statPeriod==='m'? ranges.m : ranges.r;
+    const daysLen = useMemo(()=> enumerateDates(cur.s, cur.e).length, [cur.s, cur.e]);
+    const C = useMemo(()=> countByEmpInRange(employees, data, cur.s, cur.e), [employees,data,statPeriod,start,end]);
+    const avg = useMemo(()=>{ const sum={白:0,中1:0,中2:0,夜:0,总:0}; for(const e of employees){ sum.白+=C[e]?.白||0; sum.中1+=C[e]?.中1||0; sum.中2+=C[e]?.中2||0; sum.夜+=C[e]?.夜||0; sum.总+=C[e]?.总||0; } const n = Math.max(1, employees.length); return { 白:(sum.白/n).toFixed(1), 中1:(sum.中1/n).toFixed(1), 中2:(sum.中2/n).toFixed(1), 夜:(sum.夜/n).toFixed(1), 总:(sum.总/n).toFixed(1) }; }, [employees, C]);
+
+    // —— 新增：每日分布与总和分析 ——
+    const monthSpans = useMemo(()=> monthListBetween(cur.s, cur.e), [cur.s, cur.e]);
+    const daySeries = useMemo(()=>{
+      const list = enumerateDates(cur.s, cur.e);
+      return list.map(d=>{
+        const row = data[d]||{}; let W=0,M=0,N2=0,N=0; for(const e of employees){ const v=row[e]; if(!v||v==='休') continue; if(v==='白') W++; else if(v==='中1') M++; else if(v==='中2') N2++; else if(v==='夜') N++; } const total=W+M+N2+N; return { d, W, M, N2, N, total };
+      });
+    }, [data, employees, cur.s, cur.e]);
+    const sumTotals = useMemo(()=> daySeries.reduce((acc,s)=>{ acc.白+=s.W; acc.中1+=s.M; acc.中2+=s.N2; acc.夜+=s.N; acc.总+=s.total; return acc; }, {白:0,中1:0,中2:0,夜:0,总:0}), [daySeries]);
+    const totalDays = daySeries.length;
+    const dailyAvg = {
+      总: totalDays? (sumTotals.总/totalDays).toFixed(1) : '0.0',
+      白: totalDays? (sumTotals.白/totalDays).toFixed(1) : '0.0',
+      中1: totalDays? (sumTotals.中1/totalDays).toFixed(1) : '0.0'
+    };
+    const restTotal = useMemo(()=> employees.length*daysLen - sumTotals.总, [employees.length, daysLen, sumTotals.总]);
+    const peakMid = useMemo(()=> daySeries.reduce((best,s)=> s.M>best.val ? {d:s.d, val:s.M} : best, {d:'—', val:-1}), [daySeries]);
+    const peakWhite = useMemo(()=> daySeries.reduce((best,s)=> s.W>best.val ? {d:s.d, val:s.W} : best, {d:'—', val:-1}), [daySeries]);
+
+    const restCycles = useMemo(()=>{
+      return employees.map(emp=>{
+        const months = {};
+        monthSpans.forEach(span=>{
+          const clipStart = cur.s > span.start ? cur.s : span.start;
+          const clipEnd = cur.e < span.end ? cur.e : span.end;
+          if(clipStart > clipEnd){
+            months[span.key] = { display:'', bestPair:'', counts:{}, hasData:false };
+            return;
+          }
+          const dates = enumerateDates(clipStart, clipEnd);
+          let hasData = false;
+          const weekMap = {};
+          dates.forEach(day=>{
+            const row = data[day];
+            if(!row) return;
+            const v = row[emp];
+            if(v){ hasData = true; }
+            if(v === '休'){
+              const wk = weekStartKey(day);
+              if(!weekMap[wk]) weekMap[wk] = [];
+              weekMap[wk].push(day);
+            }
+          });
+          if(!hasData){
+            months[span.key] = { display:'', bestPair:'', counts:{}, hasData:false };
+            return;
+          }
+          const counts = {};
+          Object.values(weekMap).forEach(days=>{
+            if(days.length < 2) return;
+            const sortedDays = days.slice().sort();
+            const rawPair = sortedDays.slice(0,2).map(day=> dayToW(day)).join('');
+            const pair = normalizeRestPair(rawPair);
+            if(pair){ counts[pair] = (counts[pair]||0) + 1; }
+          });
+          if(!Object.keys(counts).length){
+            months[span.key] = { display:'—', bestPair:'', counts:{}, hasData:true };
+            return;
+          }
+          let bestPair = '';
+          let bestCount = -1;
+          Object.entries(counts).forEach(([pair,count])=>{
+            if(count > bestCount || (count === bestCount && pair < bestPair)){
+              bestPair = pair;
+              bestCount = count;
+            }
+          });
+          months[span.key] = {
+            display: bestPair ? `休${bestPair}` : '—',
+            bestPair: bestPair || '',
+            counts,
+            hasData:true
+          };
+        });
+        return { emp, months };
+      });
+    }, [employees, data, monthSpans, cur.s, cur.e]);
+
+    const restPairAverages = useMemo(()=>{
+      if(monthSpans.length===0){
+        return REST_PAIRS.map(pair=> ({ pair, avg:'0.0' }));
+      }
+      const totals = REST_PAIRS.reduce((acc,p)=>{ acc[p]=0; return acc; }, {});
+      monthSpans.forEach(span=>{
+        restCycles.forEach(row=>{
+          const info = row.months[span.key];
+          const pair = info?.bestPair;
+          if(pair && (pair in totals)) totals[pair] += 1;
+        });
+      });
+      return REST_PAIRS.map(pair=> ({ pair, avg: (totals[pair]/monthSpans.length).toFixed(1) }));
+    }, [restCycles, monthSpans]);
+    const restCycleTotals = useMemo(()=>{
+      return restCycles.map(row=>{
+        const totals = REST_PAIRS.reduce((acc,p)=>{ acc[p]=0; return acc; }, {});
+        let effective = 0;
+        monthSpans.forEach(span=>{
+          const info = row.months?.[span.key];
+          if(info?.hasData){
+            effective += 1;
+            if(info.bestPair && (info.bestPair in totals)) totals[info.bestPair] += 1;
+          }
+        });
+        return { emp: row.emp, totals, effective };
+      });
+    }, [restCycles, monthSpans]);
+
+    const albumEntriesInRange = useMemo(()=> albumHistory.filter(entry=>{
+      if(!entry || !entry.range) return false;
+      const rs = entry.range.start;
+      const re = entry.range.end;
+      if(!rs || !re) return false;
+      return !(re < cur.s || rs > cur.e);
+    }), [albumHistory, cur.s, cur.e]);
+    const albumAnalysis = useMemo(()=>{
+      const perEmp = {};
+      const employeeSet = new Set();
+      const summary = { batches: albumEntriesInRange.length, whiteDays:0, midDays:0, whiteHours:0, midHours:0, totalHours:0 };
+      albumEntriesInRange.forEach(entry=>{
+        const assignments = entry.assignments || {};
+        const whiteHour = Number(entry.whiteHour)||0;
+        const midHour = Number(entry.midHour)||0;
+        Object.entries(assignments).forEach(([day, info])=>{
+          if(day < cur.s || day > cur.e) return;
+          const whiteName = info?.white || '';
+          const midName = info?.mid || '';
+          if(whiteName){
+            if(!perEmp[whiteName]) perEmp[whiteName] = { whiteDays:0, whiteHours:0, midDays:0, midHours:0 };
+            perEmp[whiteName].whiteDays += 1;
+            perEmp[whiteName].whiteHours += whiteHour;
+            summary.whiteDays += 1;
+            summary.whiteHours += whiteHour;
+            summary.totalHours += whiteHour;
+            employeeSet.add(whiteName);
+          }
+          if(midName){
+            if(!perEmp[midName]) perEmp[midName] = { whiteDays:0, whiteHours:0, midDays:0, midHours:0 };
+            perEmp[midName].midDays += 1;
+            perEmp[midName].midHours += midHour;
+            summary.midDays += 1;
+            summary.midHours += midHour;
+            summary.totalHours += midHour;
+            employeeSet.add(midName);
+          }
+        });
+      });
+      const rows = Object.entries(perEmp).map(([emp,val])=> ({
+        emp,
+        whiteDays: val.whiteDays,
+        whiteHours: val.whiteHours,
+        midDays: val.midDays,
+        midHours: val.midHours,
+        totalHours: (val.whiteHours || 0) + (val.midHours || 0)
+      })).sort((a,b)=> b.totalHours - a.totalHours || a.emp.localeCompare(b.emp,'zh-CN'));
+      const batches = summary.batches || 0;
+      const employeeCount = employeeSet.size;
+      return {
+        rows,
+        summary: {
+          ...summary,
+          employeeCount,
+          avgTotalHoursPerBatch: batches? summary.totalHours / batches : 0,
+          avgWhiteHoursPerBatch: batches? summary.whiteHours / batches : 0,
+          avgMidHoursPerBatch: batches? summary.midHours / batches : 0,
+          avgHoursPerEmployee: employeeCount? summary.totalHours / employeeCount : 0
+        }
+      };
+    }, [albumEntriesInRange, cur.s, cur.e]);
+    const albumHistoryForView = useMemo(()=> albumEntriesInRange.slice().sort((a,b)=>{
+      return new Date(b?.savedAt || 0) - new Date(a?.savedAt || 0);
+    }), [albumEntriesInRange]);
+    const albumSummary = albumAnalysis.summary || { batches:0, whiteDays:0, midDays:0, whiteHours:0, midHours:0, totalHours:0, employeeCount:0, avgTotalHoursPerBatch:0, avgWhiteHoursPerBatch:0, avgMidHoursPerBatch:0, avgHoursPerEmployee:0 };
+    const albumRows = albumAnalysis.rows || [];
+
+    const rows = useMemo(()=>{
+      const arr = employees.map(e=>{
+        const total=C[e]?.总||0; const W=C[e]?.白||0; const M=C[e]?.中1||0; const N2=C[e]?.中2||0; const N=C[e]?.夜||0;
+        const ratio = (W>0? (M/W) : (M>0? Infinity:0));
+        const ratioStr = (ratio===Infinity? '∞' : ratio.toFixed(2));
+        const diff = total - Number(adminDays||0);
+        const restDays = daysLen - total; // 统计期内的休/空
+        const cycTot = cyclesForEmp(data, e, cur.s, cur.e).length; const cycMix = mixedCyclesCount(data, e, cur.s, cur.e); const cycRatio = cycTot>0? (cycMix/cycTot) : 0;
+        const longest = longestRun(data, e, cur.s, cur.e);
+        const pass = (ratio!==Infinity && W>0) ? (ratio >= pMin && ratio <= pMax) : (W===0? (M===0) : false);
+        const mixOk = cycRatio <= (mixMax||1);
+        return { e, W, M, N2, N, total, diff, ratio, ratioStr, restDays, cycTot, cycMix, cycRatio, longest, pass, mixOk };
+      });
+      switch(orderBy){
+        case 'diff': arr.sort((a,b)=> (b.diff)-(a.diff)); break;
+        case 'longest': arr.sort((a,b)=> (b.longest)-(a.longest)); break;
+        case 'ratioDev': arr.sort((a,b)=> Math.abs((b.ratio||0)-( (pMin+pMax)/2 )) - Math.abs((a.ratio||0)-( (pMin+pMax)/2 )) ); break;
+        case 'mix': arr.sort((a,b)=> (b.cycRatio)-(a.cycRatio)); break;
+        default: break;
+      }
+      return arr;
+    }, [employees, C, daysLen, adminDays, pMin, pMax, mixMax, orderBy, data, cur.s, cur.e]);
+
+    return (
+      <Section title={`统计与对齐（${cur.s} ~ ${cur.e}）`} right={<div className="flex flex-wrap items-center gap-2 text-sm"><label>周期：</label><select className="border rounded px-2 py-1" value={statPeriod} onChange={e=>setStatPeriod(e.target.value)}><option value="y">年度</option><option value="q">季度</option><option value="m">月度</option><option value="r">当前选区</option></select><label className="ml-2">视图：</label><select className="border rounded px-2 py-1" value={statView} onChange={e=>setStatView(e.target.value)}><option value="daily">日期在岗分析</option><option value="person">人员班次统计</option><option value="rest">月度休息周期</option><option value="album">专辑审核</option></select>{statView==='person' && (<><label className="ml-2">排序：</label><select className="border rounded px-2 py-1" value={orderBy} onChange={e=>setOrderBy(e.target.value)}><option value="default">默认</option><option value="diff">差值</option><option value="longest">最长连班</option><option value="ratioDev">中/白偏差</option><option value="mix">混合比例</option></select></>)}{statView==='rest' && (<label className="ml-2 inline-flex items-center gap-1 text-xs text-gray-600"><input type="checkbox" className="rounded" checked={showRestCounts} onChange={e=> setShowRestCounts(e.target.checked)} />显示月度明细</label>)}</div>}>
+        {statView==='person' && (
+          <div className="mb-3 grid grid-cols-2 md:grid-cols-5 gap-2 text-sm">
+            <div className="rounded-xl border p-2 bg-gradient-to-br from-indigo-50 to-white"><div className="text-xs text-gray-500">平均白</div><div className="text-lg font-semibold text-indigo-700">{avg.白}</div></div>
+            <div className="rounded-xl border p-2 bg-gradient-to-br from-sky-50 to-white"><div className="text-xs text-gray-500">平均中1</div><div className="text-lg font-semibold text-sky-700">{avg.中1}</div></div>
+            <div className="rounded-xl border p-2 bg-gradient-to-br from-cyan-50 to-white"><div className="text-xs text-gray-500">平均中2</div><div className="text-lg font-semibold text-cyan-700">{avg.中2}</div></div>
+            <div className="rounded-xl border p-2 bg-gradient-to-br from-rose-50 to-white"><div className="text-xs text-gray-500">平均夜</div><div className="text-lg font-semibold text-rose-700">{avg.夜}</div></div>
+            <div className="rounded-xl border p-2 bg-gradient-to-br from-emerald-50 to-white"><div className="text-xs text-gray-500">平均总</div><div className="text-lg font-semibold text-emerald-700">{avg.总}</div></div>
+          </div>
+        )}
+
+        {['daily','person'].includes(statView) && (
+          <div className="mb-4 grid grid-cols-2 md:grid-cols-3 gap-2 text-sm">
+            <div className="rounded-xl border p-2 bg-gradient-to-br from-amber-50 to-white"><div className="text-xs text-gray-500">平均每天在岗</div><div className="text-lg font-semibold text-amber-700">{dailyAvg.总}</div></div>
+            <div className="rounded-xl border p-2 bg-gradient-to-br from-indigo-50 to-white"><div className="text-xs text-gray-500">平均每天白班</div><div className="text-lg font-semibold text-indigo-700">{dailyAvg.白}</div></div>
+            <div className="rounded-xl border p-2 bg-gradient-to-br from-sky-50 to-white"><div className="text-xs text-gray-500">平均每天中1</div><div className="text-lg font-semibold text-sky-700">{dailyAvg.中1}</div></div>
+          </div>
+        )}
+
+        {statView==='daily' && (
+          <>
+            <div className="mb-4 grid grid-cols-2 md:grid-cols-6 gap-2 text-sm">
+              <div className="rounded-xl border p-2 bg-indigo-50/60"><div className="text-xs text-gray-500">白（总人次）</div><div className="text-lg font-semibold text-indigo-700">{sumTotals.白}</div></div>
+              <div className="rounded-xl border p-2 bg-sky-50/60"><div className="text-xs text-gray-500">中1（总人次）</div><div className="text-lg font-semibold text-sky-700">{sumTotals.中1}</div></div>
+              <div className="rounded-xl border p-2 bg-cyan-50/60"><div className="text-xs text-gray-500">中2（总人次）</div><div className="text-lg font-semibold text-cyan-700">{sumTotals.中2}</div></div>
+              <div className="rounded-xl border p-2 bg-rose-50/60"><div className="text-xs text-gray-500">夜（总人次）</div><div className="text-lg font-semibold text-rose-700">{sumTotals.夜}</div></div>
+              <div className="rounded-xl border p-2 bg-emerald-50/60"><div className="text-xs text-gray-500">在岗（总人次）</div><div className="text-lg font-semibold text-emerald-700">{sumTotals.总}</div></div>
+              <div className="rounded-xl border p-2 bg-gray-50"><div className="text-xs text-gray-500">休（估算）</div><div className="text-lg font-semibold text-gray-800">{restTotal}</div></div>
+            </div>
+
+            <div className="overflow-auto rounded-xl border">
+              <table className="text-sm min-w-[780px] w-full">
+                <thead className="bg-gray-50">
+                  <tr className="text-gray-500">
+                    <th className="text-left py-2 px-3">日期</th>
+                    <th className="text-right py-2 px-3">在岗</th>
+                    <th className="text-left py-2 px-3 w-[320px]">构成（白 / 中1 / 中2 / 夜）</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {daySeries.map(s=>{
+                    const pW = s.total? Math.round(s.W/s.total*100) : 0;
+                    const pM = s.total? Math.round(s.M/s.total*100) : 0;
+                    const pM2= s.total? Math.round(s.N2/s.total*100) : 0;
+                    const pN = s.total? Math.round(s.N/s.total*100) : 0;
+                    return (
+                      <tr key={s.d} className="border-t hover:bg-gray-50">
+                        <td className="py-1.5 px-3">{s.d}</td>
+                        <td className="py-1.5 px-3 text-right">{s.total}</td>
+                        <td className="py-1.5 px-3">
+                          <div className="h-3 rounded-full bg-gray-100 overflow-hidden flex">
+                            <div style={{width:`${pW}%`, background: shiftColors['白']}} title={`白 ${s.W}`}></div>
+                            <div style={{width:`${pM}%`, background: shiftColors['中1']}} title={`中1 ${s.M}`}></div>
+                            <div style={{width:`${pM2}%`, background: shiftColors['中2']}} title={`中2 ${s.N2}`}></div>
+                            <div style={{width:`${pN}%`, background: shiftColors['夜']}} title={`夜 ${s.N}`}></div>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="mt-3 text-xs text-gray-600">高峰提示：中1最多 {peakMid.val<0?0:peakMid.val}（{peakMid.d}），白班最多 {peakWhite.val<0?0:peakWhite.val}（{peakWhite.d}）。</div>
+          </>
+        )}
+
+        {statView==='person' && (
+          <>
+            <div className="flex items-center gap-2 mb-3 mt-4 text-sm">
+              <label className="inline-flex items-center gap-2">行政班应上天数（当前周期）：<input type="number" className="w-24 border rounded px-2 py-1" value={adminDays} onChange={e=> setAdminDays(Number(e.target.value||0))}/></label>
+              <span className="text-gray-500">差值= 实际总天数 - 行政班应上天数（正=超出，负=不足）</span>
+            </div>
+            <div className="overflow-auto">
+              <table className="text-sm min-w-[1100px] w-full">
+                <thead>
+                  <tr className="text-gray-500">
+                    <th className="text-left">姓名</th>
+                    {['白','中1','中2','夜','总','休','差值','中/白','中/白状态','最长连班','混合周期','混合状态','建议'].map((h,i)=> <th key={i} className={`text-right pr-3 ${i===0?'text-left':''}`}>{h}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map(r=> (
+                    <tr key={r.e} className="border-t hover:bg-gray-50">
+                      <td className="py-1 text-left">{r.e}</td>
+                      {[r.W, r.M, r.N2, r.N, r.total, r.restDays, r.diff, r.ratioStr].map((v,idx)=> <td key={idx} className={`py-1 text-right pr-3 ${idx===6&&(v<0?'text-red-600':v>0?'text-emerald-600':'text-gray-700')}`}>{v}</td>)}
+                      <td className="py-1 text-right pr-3">{r.pass? <span className="badge bg-emerald-100 text-emerald-700">OK</span> : <span className="badge bg-rose-100 text-rose-700">OFF</span>}</td>
+                      <td className={`py-1 text-right pr-3 ${r.longest>6?'text-rose-600 font-medium':''}`}>{r.longest}</td>
+                      <td className={`py-1 text-right pr-3`}>{r.cycMix}/{r.cycTot}（{(r.cycRatio*100).toFixed(0)}%）</td>
+                      <td className="py-1 text-right pr-3">{r.mixOk? <span className="badge bg-emerald-100 text-emerald-700">OK</span> : <span className="badge bg-rose-100 text-rose-700">超限</span>}</td>
+                      <td className="py-1 text-right pr-3 text-gray-700">{(()=>{ if(adminDays>0){ if(r.diff>0) return `建议减 ${r.diff}`; if(r.diff<0) return `建议补 ${-r.diff}`; } return '—'; })()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+
+        {statView==='rest' && (
+          <>
+            <div className="mb-4">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-medium text-gray-700">休息周期平均人数（按月度主休类型）</h3>
+                <span className="text-xs text-gray-400">统计区间：{cur.s} ~ {cur.e}</span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+                {restPairAverages.map(item=> (
+                  <div key={item.pair} className="rounded-2xl border bg-gradient-to-br from-white to-indigo-50/70 p-3 text-center shadow-sm">
+                    <div className="text-xs text-gray-500">休{item.pair}</div>
+                    <div className="text-xl font-semibold text-indigo-600">{item.avg}<span className="text-sm text-gray-500 ml-1">人</span></div>
+                  </div>
+                ))}
+              </div>
+              <div className="text-xs text-gray-500 mt-2">说明：以上数值为各月主要休息组合对应的平均人数，便于判断休息偏好分布。</div>
+            </div>
+            <div className="overflow-auto rounded-2xl border">
+              <table className="min-w-[720px] w-full text-sm">
+                <thead className="bg-gray-50 text-gray-600">
+                  <tr>
+                    <th className="text-left py-2 px-3 w-36">人员</th>
+                    {monthSpans.map(span=> (
+                      <th key={span.key} className="text-center py-2 px-3">{span.label}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {restCycles.map(row=> (
+                    <tr key={row.emp} className="border-t hover:bg-indigo-50/20">
+                      <td className="py-2 px-3 font-medium text-gray-700">{row.emp}</td>
+                      {monthSpans.map(span=>{
+                        const info = row.months[span.key] || {};
+                        const pairs = Object.entries(info.counts||{}).sort((a,b)=> b[1]-a[1]);
+                        return (
+                          <td key={span.key} className="py-2 px-3 text-center">
+                            <div className="flex flex-col items-center gap-1">
+                              <span className={`text-base font-semibold ${info.bestPair? 'text-indigo-600':'text-gray-400'}`}>{info.display || (info.hasData? '—':'')}</span>
+                              {showRestCounts && (
+                                <div className="flex flex-wrap justify-center gap-1 text-[11px] text-gray-500 max-w-[160px]">
+                                  {pairs.length>0 ? (
+                                    pairs.map(([pair,count])=> (
+                                      <span key={pair} className="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700">休{pair}×{count}</span>
+                                    ))
+                                  ) : info.hasData ? (
+                                    <span className="text-gray-400">无完整休息周期</span>
+                                  ) : null}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {showRestCounts && restCycleTotals.length>0 && (
+              <div className="mt-4 rounded-2xl border bg-white overflow-hidden">
+                <div className="px-4 py-3 border-b bg-gray-50 text-sm font-medium text-gray-700 flex items-center justify-between"><span>主要休息周期次数汇总</span><span className="text-xs text-gray-400">统计区间共 {monthSpans.length} 个月</span></div>
+                <div className="overflow-auto">
+                  <table className="min-w-[680px] w-full text-sm">
+                    <thead className="bg-gray-50 text-gray-500">
+                      <tr>
+                        <th className="text-left py-2 px-3">人员</th>
+                        {REST_PAIRS.map(pair=> <th key={`tot-${pair}`} className="text-right py-2 px-3">休{pair}</th>)}
+                        <th className="text-right py-2 px-3">有排班月份</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {restCycleTotals.map(row=> (
+                        <tr key={`totrow-${row.emp}`} className="border-t hover:bg-indigo-50/20">
+                          <td className="py-1.5 px-3 text-gray-700">{row.emp}</td>
+                          {REST_PAIRS.map(pair=> <td key={`cell-${row.emp}-${pair}`} className="py-1.5 px-3 text-right">{row.totals[pair]}</td>)}
+                          <td className="py-1.5 px-3 text-right text-gray-600">{row.effective}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+        {statView==='album' && (
+          <>
+            <div className="mb-4 flex flex-wrap items-center gap-3 text-sm">
+              <span className="font-medium text-gray-700">专辑审核视图</span>
+              <div className="inline-flex rounded-full border border-indigo-100 bg-indigo-50/40 p-0.5">
+                <button onClick={()=>setAlbumStatMode('analysis')} className={`px-3 py-1 rounded-full text-xs font-medium transition ${albumStatMode==='analysis' ? 'bg-indigo-600 text-white shadow' : 'text-indigo-600 hover:bg-indigo-100'}`}>数据统计分析</button>
+                <button onClick={()=>setAlbumStatMode('history')} className={`px-3 py-1 rounded-full text-xs font-medium transition ${albumStatMode==='history' ? 'bg-indigo-600 text-white shadow' : 'text-indigo-600 hover:bg-indigo-100'}`}>历史排班表</button>
+              </div>
+              <span className="text-xs text-gray-400">基于专辑审核确认记录实时汇总</span>
+            </div>
+            {albumStatMode==='analysis' ? (
+              albumEntriesInRange.length===0 ? (
+                <div className="text-sm text-gray-500">当前统计周期内暂无已确认的专辑审核排班，可在专辑审核自动排班页点击“确认排班”后查看。</div>
+              ) : (
+                <>
+                  <div className="mb-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 text-sm">
+                    <div className="rounded-2xl border bg-gradient-to-br from-white to-indigo-50 p-3">
+                      <div className="text-xs text-gray-500">确认批次</div>
+                      <div className="text-lg font-semibold text-indigo-700">{albumSummary.batches}</div>
+                    </div>
+                    <div className="rounded-2xl border bg-gradient-to-br from-white to-emerald-50 p-3">
+                      <div className="text-xs text-gray-500">参与人员数</div>
+                      <div className="text-lg font-semibold text-emerald-700">{albumSummary.employeeCount}</div>
+                    </div>
+                    <div className="rounded-2xl border bg-gradient-to-br from-white to-sky-50 p-3">
+                      <div className="text-xs text-gray-500">累计白班天数</div>
+                      <div className="text-lg font-semibold text-sky-600">{albumSummary.whiteDays}</div>
+                    </div>
+                    <div className="rounded-2xl border bg-gradient-to-br from-white to-amber-50 p-3">
+                      <div className="text-xs text-gray-500">累计中班天数</div>
+                      <div className="text-lg font-semibold text-amber-600">{albumSummary.midDays}</div>
+                    </div>
+                    <div className="rounded-2xl border bg-gradient-to-br from-white to-rose-50 p-3">
+                      <div className="text-xs text-gray-500">单批平均总时长</div>
+                      <div className="text-lg font-semibold text-rose-600">{albumSummary.avgTotalHoursPerBatch.toFixed(2)}<span className="text-sm text-gray-500 ml-1">小时</span></div>
+                    </div>
+                    <div className="rounded-2xl border bg-gradient-to-br from-white to-slate-50 p-3">
+                      <div className="text-xs text-gray-500">人均审核时长</div>
+                      <div className="text-lg font-semibold text-slate-700">{albumSummary.avgHoursPerEmployee.toFixed(2)}<span className="text-sm text-gray-500 ml-1">小时</span></div>
+                    </div>
+                  </div>
+                  <div className="mb-3 text-xs text-gray-500">平均每批白班 {albumSummary.avgWhiteHoursPerBatch.toFixed(2)} 小时，中班 {albumSummary.avgMidHoursPerBatch.toFixed(2)} 小时。</div>
+                  <div className="overflow-auto rounded-2xl border">
+                    <table className="min-w-[680px] w-full text-sm">
+                      <thead className="bg-gray-50 text-gray-500">
+                        <tr>
+                          <th className="text-left py-2 px-3">人员</th>
+                          <th className="text-right py-2 px-3">白班天数</th>
+                          <th className="text-right py-2 px-3">白班时长</th>
+                          <th className="text-right py-2 px-3">中班天数</th>
+                          <th className="text-right py-2 px-3">中班时长</th>
+                          <th className="text-right py-2 px-3">总时长</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {albumRows.map(row=> (
+                          <tr key={`album-analysis-${row.emp}`} className="border-t hover:bg-indigo-50/20">
+                            <td className="py-1.5 px-3 text-gray-700">{row.emp}</td>
+                            <td className="py-1.5 px-3 text-right">{row.whiteDays}</td>
+                            <td className="py-1.5 px-3 text-right">{row.whiteHours.toFixed(2)}</td>
+                            <td className="py-1.5 px-3 text-right">{row.midDays}</td>
+                            <td className="py-1.5 px-3 text-right">{row.midHours.toFixed(2)}</td>
+                            <td className="py-1.5 px-3 text-right font-medium text-indigo-700">{row.totalHours.toFixed(2)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )
+            ) : (
+              albumHistoryForView.length===0 ? (
+                <div className="text-sm text-gray-500">当前统计周期内暂无历史排班，可在专辑审核自动排班页确认后查看。</div>
+              ) : (
+                <div className="space-y-4">
+                  {albumHistoryForView.map(entry=> {
+                    const days = Object.keys(entry.assignments||{}).filter(day=> day>=cur.s && day<=cur.e).sort();
+                    const savedAt = entry.savedAt ? new Date(entry.savedAt).toLocaleString() : '—';
+                    const totals = entry.totals || {};
+                    const coverage = entry.coverage || {};
+                    return (
+                      <div key={entry.id} className="rounded-2xl border bg-white overflow-hidden shadow-sm">
+                        <div className="px-4 py-3 border-b bg-gray-50 text-sm font-medium text-gray-700 flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex flex-col sm:flex-row sm:items-center sm:gap-3">
+                            <span>{entry.range?.start} ~ {entry.range?.end}</span>
+                            <span className="text-xs text-gray-400">保存于 {savedAt}</span>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-gray-600">
+                            <span className="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700">白班 {totals.whiteDays||0} 天 / {(Number(totals.whiteHours)||0).toFixed(2)} 小时</span>
+                            <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">中班 {totals.midDays||0} 天 / {(Number(totals.midHours)||0).toFixed(2)} 小时</span>
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">总时长 {(Number(totals.totalHours)||0).toFixed(2)} 小时</span>
+                            <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">时长差值 {(Number(entry.diff)||0).toFixed(2)} 小时</span>
+                            <span className="px-2 py-0.5 rounded-full bg-sky-50 text-sky-700">覆盖 {coverage.totalDays||0} 天</span>
+                          </div>
+                        </div>
+                        {days.length===0 ? (
+                          <div className="p-4 text-xs text-gray-500">当前统计周期内与该记录无重叠日期。</div>
+                        ) : (
+                          <div className="overflow-auto">
+                            <table className="min-w-[600px] w-full text-sm">
+                              <thead className="bg-gray-50 text-gray-500">
+                                <tr>
+                                  <th className="text-left py-2 px-3">日期</th>
+                                  <th className="text-left py-2 px-3">星期</th>
+                                  <th className="text-left py-2 px-3">白班审核</th>
+                                  <th className="text-left py-2 px-3">中班审核</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {days.map(day=>{
+                                  const info = entry.assignments?.[day] || {};
+                                  const wk = WN[new Date(day).getDay()];
+                                  return (
+                                    <tr key={`${entry.id}-${day}`} className="border-t hover:bg-indigo-50/20">
+                                      <td className="py-1.5 px-3 font-medium text-gray-700">{day}</td>
+                                      <td className="py-1.5 px-3 text-gray-500">周{wk}</td>
+                                      <td className="py-1.5 px-3"><span className={`inline-block px-2 py-0.5 rounded-full text-xs ${info.white ? 'bg-white border border-gray-200 text-gray-700' : 'bg-rose-50 border border-rose-200 text-rose-600'}`}>{info.white || '未分配'}</span></td>
+                                      <td className="py-1.5 px-3"><span className={`inline-block px-2 py-0.5 rounded-full text-xs ${info.mid ? 'bg-white border border-gray-200 text-gray-700' : 'bg-rose-50 border border-rose-200 text-rose-600'}`}>{info.mid || '未分配'}</span></td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )
+            )}
+          </>
+        )}
+      </Section>
+    );
+  })();
+
+  const ViewHistory = (
+    <Section title={`历史版本（${teamDisplayName}）`} right={<button onClick={loadVersions} className={`px-3 py-1.5 rounded-full text-sm text-white transition ${(editingLocked || versionsLoading)?'bg-gray-300 cursor-not-allowed':'bg-gray-800 hover:bg-gray-700'}`} disabled={editingLocked || versionsLoading}>
+      {versionsLoading ? (<span className="flex items-center gap-2"><Spinner className="w-4 h-4 text-white" /><span>刷新中…</span></span>) : '刷新列表'}
+    </button>}>
+      {versionsLoading && versions.length>0 && (
+        <div className="flex items-center gap-2 text-xs text-gray-500 mb-3">
+          <Spinner className="w-4 h-4 text-indigo-500" />
+          <span>正在刷新历史版本，请稍候…</span>
+        </div>
+      )}
+      {versionsLoading && versions.length===0 ? (
+        <div className="text-sm text-gray-500">正在加载历史版本…</div>
+      ) : versions.length===0 ? (
+        <p className="text-sm text-gray-500">当前团队「{teamDisplayName}」暂无历史版本，请在“设置 / 导出”页保存新版本或稍后刷新。</p>
+      ) : (
+        <div className="overflow-auto max-h-64">
+          <table className="text-sm w-full min-w-[780px]">
+            <thead className="bg-gray-50 text-gray-500">
+              <tr>
+                <th className="text-left py-2 px-3">版本名</th>
+                <th className="text-left py-2 px-3">团队</th>
+                <th className="text-left py-2 px-3">版本ID</th>
+                <th className="text-left py-2 px-3">保存时间</th>
+                <th className="text-left py-2 px-3">操作用户</th>
+                <th className="text-left py-2 px-3">备注</th>
+                <th className="text-left py-2 px-3">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {versions.map(v=> {
+                const name = v.note || v.name || '';
+                const remark = v.remark || v.description || '';
+                const teamName = v.team_name || v.teamName || teamDisplayName;
+                const createdAt = v.created_at || v.createdAt || '—';
+                const operator = v.created_by_name || v.created_by || '管理员';
+                const deleting = versionDeletingId === v.id;
+                return (
+                  <tr key={v.id} className="border-t hover:bg-gray-50">
+                    <td className="py-1 px-3">
+                      <div className="font-medium text-gray-900">{name || '（未命名）'}</div>
+                    </td>
+                    <td className="py-1 px-3 text-gray-600">{teamName}</td>
+                    <td className="py-1 px-3 text-gray-600">{v.id}</td>
+                    <td className="py-1 px-3 text-gray-600">{createdAt}</td>
+                    <td className="py-1 px-3 text-gray-600">{operator}</td>
+                    <td className="py-1 px-3 text-gray-600">{remark || '—'}</td>
+                    <td className="py-1 px-3">
+                      <div className="flex items-center gap-3">
+                        <button type="button" className="text-indigo-600 hover:underline disabled:text-gray-400 disabled:no-underline" onClick={()=>loadVersionById(v.id)} disabled={versionsLoading || deleting}>载入</button>
+                        <button type="button" className="flex items-center gap-1 text-rose-600 hover:underline disabled:text-rose-300 disabled:no-underline" onClick={()=>deleteVersionById(v.id)} disabled={deleting || versionsLoading}>
+                          {deleting ? (<><Spinner className="w-3.5 h-3.5 text-rose-500" /><span>删除中</span></>) : '删除'}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Section>
+  );
+  const scheduleYearLabel = (()=>{
+    const rawYear = (start || '').slice(0,4);
+    return /^\d{4}$/.test(rawYear) ? rawYear : String(today.getFullYear());
+  })();
+  const ViewSettings = (
+    <Section title="设置 / 导出">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label className="block text-sm text-gray-600 mb-1">保存备注</label>
+          <input className="w-full border rounded px-3 py-2" value={note}
+            onCompositionStart={()=>{}}
+            onCompositionEnd={(e)=>{ setNote(e.target.value); }}
+            onChange={e=>setNote(e.target.value)} placeholder="例如：10月第一版"/>
+        </div>
+        <div className="flex flex-wrap items-end gap-2">
+          <PillBtn onClick={saveToServer} color="emerald" disabled={editingLocked} title={editingLocked?'执行中：只读':''}>保存新版本</PillBtn>
+          <PillBtn onClick={exportExcel} color="sky" disabled={editingLocked} title={editingLocked?'执行中：只读':''}>服务器导出 Excel/CSV</PillBtn>
+        </div>
+      </div>
+      <div className="mt-6">
+        <h3 className="font-semibold mb-2">自动排班优化</h3>
+        <label className={`flex items-start gap-3 text-sm ${editingLocked?'opacity-60':''}`}>
+          <input type="checkbox" className="mt-1" checked={yearlyOptimize} disabled={editingLocked}
+            onChange={e=> setYearlyOptimize(e.target.checked)} />
+          <span>
+            <span className="font-medium text-gray-700">按当年累计班次优化</span>
+            <span className="block text-xs text-gray-500 mt-1">开启后，自动排班会参考 {scheduleYearLabel} 年 1 月至排班开始日前的历史安排，延续休息日并均衡全年班次占比。</span>
+          </span>
+        </label>
+      </div>
+      <div className="mt-6">
+        <h3 className="font-semibold mb-2">班次颜色（同步保存到浏览器）</h3>
+        <div className="flex flex-wrap gap-4 items-center text-sm">
+          {['白','中1','中2','夜','休'].map(s=> (
+            <label key={s} className={`flex items-center gap-2 ${editingLocked?'opacity-60':''}`}><span className="w-10 text-right">{s}</span><input type="color" disabled={editingLocked} value={shiftColors[s]||'#ffffff'} onChange={e=> setShiftColors(p=>({ ...p, [s]: e.target.value }))} /></label>
+          ))}
+          <button className={`px-3 py-1.5 rounded ${editingLocked?'bg-gray-200 cursor-not-allowed':'bg-gray-100 hover:bg-gray-200'}`} disabled={editingLocked} onClick={()=> setShiftColors({'白':'#eef2ff','中1':'#e0f2fe','中2':'#cffafe','夜':'#fee2e2','休':'#f3f4f6'})}>恢复默认</button>
+        </div>
+      </div>
+      <div className="mt-6 space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold">在岗人数提醒颜色</h3>
+          <button className={`text-xs px-2 py-1 rounded ${editingLocked?'bg-gray-200 cursor-not-allowed':'bg-gray-100 hover:bg-gray-200'}`} disabled={editingLocked} onClick={()=> setStaffingAlerts(normalizeStaffingAlerts())}>恢复默认</button>
+        </div>
+        <div className="text-xs text-gray-500">可自定义排班表中「在岗 / 白 / 中1」统计的颜色提示。例如当中1 ≤ 3 时给出醒目颜色。</div>
+        <div className="space-y-3">
+          {[
+            { key:'total', label:'在岗总人数' },
+            { key:'white', label:'白班人数' },
+            { key:'mid1', label:'中1人数' }
+          ].map(item=>{
+            const conf = staffingAlerts[item.key];
+            return (
+              <div key={item.key} className={`grid grid-cols-1 md:grid-cols-[180px_1fr] gap-3 items-center text-sm ${editingLocked?'opacity-70':''}`}>
+                <div className="font-medium text-gray-700">{item.label}</div>
+                <div className="grid grid-cols-1 md:grid-cols-[auto_auto_auto_auto] gap-2 items-center">
+                  <span className="text-xs text-gray-500">≤</span>
+                  <input type="number" className="w-20 border rounded px-2 py-1" value={conf?.threshold ?? 0} disabled={editingLocked} onChange={e=> setStaffingAlerts(prev=>{
+                    const next = normalizeStaffingAlerts(prev);
+                    next[item.key].threshold = Number(e.target.value || 0);
+                    return next;
+                  })} />
+                  <input type="color" className="w-16" disabled={editingLocked} value={conf?.lowColor || '#ffffff'} onChange={e=> setStaffingAlerts(prev=>{
+                    const next = normalizeStaffingAlerts(prev);
+                    next[item.key].lowColor = e.target.value;
+                    return next;
+                  })} />
+                  <div className="flex items-center gap-2 text-xs text-gray-500"><span>大于阈值</span><input type="color" className="w-16" disabled={editingLocked} value={conf?.highColor || '#ffffff'} onChange={e=> setStaffingAlerts(prev=>{
+                    const next = normalizeStaffingAlerts(prev);
+                    next[item.key].highColor = e.target.value;
+                    return next;
+                  })} /></div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </Section>
+  );
+
+  const extraAccounts = orgConfig.accounts.filter(acc=> acc.username!=='admin');
+  const ViewRoles = canManageRoles ? (
+    <>
+      <Section title="团队管理" right={<PillBtn onClick={addTeam} color="sky" disabled={editingLocked}>新增团队</PillBtn>}>
+        {teamsList.length===0 ? (
+          <p className="text-sm text-gray-500">暂未创建团队，请点击右上角按钮新增。</p>
+        ) : (
+          <div className="space-y-3">
+            {teamsList.map(t=> (
+              <div key={t.id} className="border rounded-2xl p-4 bg-white shadow-sm">
+                <div className="flex flex-wrap items-end gap-3 text-sm">
+                  <label className="flex flex-col text-sm text-gray-600">
+                    <span className="mb-1">团队名称</span>
+                    <input className={`border rounded px-3 py-1.5 ${editingLocked?'bg-gray-100':''}`} value={t.name}
+                      onChange={e=> updateTeamField(t.id, 'name', e.target.value)} disabled={editingLocked} />
+                  </label>
+                  <div className="text-xs text-gray-500">ID：{t.id}</div>
+                  <label className="flex-1 flex flex-col text-sm text-gray-600 min-w-[200px]">
+                    <span className="mb-1">备注</span>
+                    <input className={`border rounded px-3 py-1.5 ${editingLocked?'bg-gray-100':''}`} value={t.remark||''}
+                      onChange={e=> updateTeamField(t.id, 'remark', e.target.value)} disabled={editingLocked} />
+                  </label>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-4 text-sm">
+                  <label className={`inline-flex items-center gap-2 ${editingLocked?'opacity-60':''}`}>
+                    <input type="checkbox" checked={t.features?.albumScheduler !== false} disabled={editingLocked}
+                      onChange={e=> updateTeamFeature(t.id, 'albumScheduler', e.target.checked)} /> 启用专辑审核自动排班
+                  </label>
+                </div>
+                {teamsList.length>1 && (
+                  <div className="mt-3 text-right">
+                    <button onClick={()=> removeTeam(t.id)} className={`text-sm text-rose-600 ${editingLocked?'opacity-50 cursor-not-allowed':'hover:underline'}`} disabled={editingLocked}>删除团队</button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </Section>
+      <Section title="账号与权限" right={<PillBtn onClick={addAccount} color="emerald" disabled={editingLocked}>新增账号</PillBtn>}>
+        <div className="space-y-4 text-sm">
+          <div className="rounded-xl border border-dashed border-indigo-200 bg-indigo-50/40 p-4 text-xs text-indigo-700">
+            超级管理员 <span className="font-medium">admin</span> 拥有全部权限，可在此创建访客或管理者账号，并分配可访问的团队与菜单权限。
+          </div>
+          {extraAccounts.length===0 ? (
+            <p className="text-sm text-gray-500">暂未创建其他账号。</p>
+          ) : (
+            extraAccounts.map(acc=>{
+              const hasAll = acc.teamAccess && acc.teamAccess.includes('*');
+              const passwordDraft = accountPasswordDrafts[acc.username] || '';
+              return (
+                <div key={acc.username} className="border rounded-2xl p-4 bg-white shadow-sm space-y-3">
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                    <label className="flex flex-col text-gray-600 text-sm">
+                      <span className="mb-1">账号</span>
+                      <input className={`border rounded px-3 py-1.5 ${editingLocked?'bg-gray-100':''}`} value={acc.username}
+                        onChange={e=> setAccountUsername(acc.username, e.target.value)} disabled={editingLocked} />
+                    </label>
+                    <label className="flex flex-col text-gray-600 text-sm">
+                      <span className="mb-1">显示名称</span>
+                      <input className={`border rounded px-3 py-1.5 ${editingLocked?'bg-gray-100':''}`} value={acc.displayName||''}
+                        onChange={e=> setAccountDisplayName(acc.username, e.target.value)} disabled={editingLocked} />
+                    </label>
+                    <label className="flex flex-col text-gray-600 text-sm">
+                      <span className="mb-1">角色</span>
+                      <select className={`border rounded px-3 py-1.5 ${editingLocked?'bg-gray-100':''}`} value={acc.role||'guest'}
+                        onChange={e=> setAccountRole(acc.username, e.target.value)} disabled={editingLocked}>
+                        <option value="guest">访客（只读）</option>
+                        <option value="manager">管理者</option>
+                      </select>
+                    </label>
+                  </div>
+                  <div className="flex flex-wrap items-end gap-2">
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">登录密码</label>
+                      <input type="password" className={`border rounded px-3 py-1.5 ${editingLocked?'bg-gray-100':''}`} value={passwordDraft}
+                        onChange={e=> updateAccountPasswordDraft(acc.username, e.target.value)} placeholder="留空表示清空" disabled={editingLocked} />
+                    </div>
+                    <PillBtn onClick={()=> setAccountPassword(acc.username)} color="indigo" disabled={editingLocked}>更新密码</PillBtn>
+                    <button onClick={()=> removeAccount(acc.username)} className={`text-sm text-rose-600 ${editingLocked?'opacity-50 cursor-not-allowed':'hover:underline'}`} disabled={editingLocked}>删除账号</button>
+                  </div>
+                  <div>
+                    <div className="text-xs text-gray-500 mb-1">可切换团队</div>
+                    <div className="flex flex-wrap gap-3">
+                      <label className={`inline-flex items-center gap-2 ${editingLocked?'opacity-60':''}`}>
+                        <input type="checkbox" checked={hasAll} disabled={editingLocked}
+                          onChange={e=> setAccountAllTeams(acc.username, e.target.checked)} /> 全部团队
+                      </label>
+                      {teamsList.map(teamItem=> (
+                        <label key={teamItem.id} className={`inline-flex items-center gap-2 ${hasAll?'opacity-60':''}`}>
+                          <input type="checkbox" disabled={editingLocked || hasAll} checked={hasAll || (acc.teamAccess||[]).includes(teamItem.id)}
+                            onChange={()=> toggleAccountTeam(acc.username, teamItem.id)} /> {teamItem.name}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-gray-500 mb-1">菜单权限</div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                      {MENU_KEYS.filter(key=> key!=='roles').map(key=>{
+                        const conf = (acc.menus && acc.menus[key]) ? acc.menus[key] : defaultMenuPerms()[key];
+                        const visible = conf.visible !== false;
+                        const editable = conf.editable !== false;
+                        return (
+                          <div key={key} className="flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-2">
+                            <span className="flex-1 text-sm text-gray-700">{menuLabels[key]}</span>
+                            <label className={`inline-flex items-center gap-1 text-xs ${editingLocked?'opacity-60':''}`}>
+                              <input type="checkbox" checked={visible} disabled={editingLocked}
+                                onChange={e=> updateAccountMenu(acc.username, key, 'visible', e.target.checked)} /> 可见
+                            </label>
+                            <label className={`inline-flex items-center gap-1 text-xs ${editingLocked||!visible?'opacity-60':''}`}>
+                              <input type="checkbox" checked={editable && visible} disabled={editingLocked || !visible}
+                                onChange={e=> updateAccountMenu(acc.username, key, 'editable', e.target.checked)} /> 可编辑
+                            </label>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </Section>
+    </>
+  ) : (
+    <Section title="角色设置">
+      <p className="text-sm text-gray-500">仅超级管理员可访问此页面。</p>
+    </Section>
+  );
+
+  const Topbar = (
+    <div className="sticky top-0 z-30 bg-gradient-to-b from-white/90 to-white/60 backdrop-blur border-b">
+      <div className="max-w-[1400px] mx-auto px-4 py-3 flex items-center gap-3">
+        <h1 className="text-xl font-bold text-indigo-600">排班助手（测试版）</h1>
+        <div className="flex-1"></div>
+        <div className="flex lg:hidden items-center gap-2 text-sm mr-2">
+          <TeamSwitcher teams={accessibleTeams} value={team} onChange={setTeam} disabled={prog.running} canManage={canManageRoles} onManage={()=> setTab('roles')} />
+        </div>
+        <div className="hidden lg:flex items-center gap-2 text-sm">
+          <TeamSwitcher teams={accessibleTeams} value={team} onChange={setTeam} disabled={prog.running} canManage={canManageRoles} onManage={()=> setTab('roles')} />
+          <input type="date" className={`border rounded px-3 py-1.5 ${editingLocked?'bg-gray-100':''}`} value={start} onChange={e=>setStart(e.target.value)} disabled={editingLocked} />
+          <span className="text-gray-400">—</span>
+          <input type="date" className={`border rounded px-3 py-1.5 ${editingLocked?'bg-gray-100':''}`} value={end} onChange={e=>setEnd(e.target.value)} disabled={editingLocked} />
+        </div>
+        <div className="flex items-center gap-2">
+          <PillBtn onClick={exportExcel} color="sky" disabled={editingLocked}>导出</PillBtn>
+          <button onClick={()=> clearRange('empty')} className={`px-3 py-1.5 rounded-full text-sm ${editingLocked?'bg-gray-200 cursor-not-allowed':'bg-amber-100 hover:bg-amber-200'}`} disabled={editingLocked}>清空当前范围</button>
+          {user ? (<button onClick={async()=>{ await apiPost('/logout',{}).catch(()=>{}); setUser(null); }} className={`px-3 py-1.5 rounded-full text-sm ${editingLocked?'bg-gray-200 cursor-not-allowed':'bg-gray-200 hover:bg-gray-300'}`} disabled={editingLocked}>退出</button>) : (<span className="text-xs text-gray-500">未登录</span>)}
+        </div>
+      </div>
+      {Object.keys(nightIssues).length>0 && (
+        <div className="max-w-[1400px] mx-auto px-4 pb-2 text-sm text-red-600">夜班窗口缺：{Object.entries(nightIssues).slice(0,10).map(([k,v])=>`${k}${v==='缺夜&中2'?'(缺夜&中2)':v==='缺夜'?'(缺夜)':'(缺中2)'}`).join('，')}{Object.keys(nightIssues).length>10?' …':''}</div>
+      )}
+    </div>
+  );
+
+  const content = ({ grid: ViewGrid, batch: ViewBatch, album: ViewAlbum, users: ViewEmployees, stats: ViewStats, history: ViewHistory, settings: ViewSettings, roles: ViewRoles }[tab]) || ViewBatch;
+
+  return (
+    <div className="min-h-screen">
+      {Topbar}
+      <div className="max-w-[1400px] mx-auto px-4 py-6">
+        <SideDock tab={tab} setTab={setTab} menuPerms={menuPerms}/>
+        <main className="animate-fade-in">{content}<footer className="text-center text-xs text-gray-400 py-6">© 排班助手（测试版） v2.3</footer></main>
+      </div>
+
+      {toast && (
+        <div className="fixed top-4 right-4 z-50">
+          <div className={`animate-fade-in px-4 py-3 rounded-xl shadow-lg text-sm text-white ${toast.type==='success' ? 'bg-emerald-500' : toast.type==='error' ? 'bg-rose-500' : 'bg-gray-800'}`}>
+            {toast.message}
+          </div>
+        </div>
+      )}
+      {prog.running && (
+        <div className="floating-progress">
+          <div className="fp-card rounded-2xl p-4 animate-fade-in">
+            <div className="flex items-center justify-between text-sm font-medium text-indigo-700"><span>排班执行中</span><span>{Math.round(prog.done/prog.total*100)}%</span></div>
+            <div className="mt-2 h-2 rounded-full bg-white/60 overflow-hidden"><div className="h-2 bg-indigo-500 transition-all" style={{width: `${Math.round(prog.done/prog.total*100)}%`}}></div></div>
+            <div className="mt-2 text-xs text-gray-600">{prog.stage}</div>
+            <div className="mt-2 logbox p-2 text-[12px] text-gray-700">
+              {logs.map((l,i)=> <div key={i} className="leading-5">{l}</div>)}
+              <div ref={logEndRef}></div>
+            </div>
+          </div>
+        </div>
+      )}
+      {picker.open && (
+        <div className="fixed z-50" style={{ left: picker.x, top: picker.y }}>
+          <div ref={pickerRef} className="picker bg-white border rounded-xl p-1 w-40">
+            {SHIFT_TYPES.map(s=> (
+              <button key={s} className="w-full text-left px-3 py-2 rounded hover:bg-gray-100" onClick={()=>{ setCellByIndex(picker.di, picker.ei, s); setPicker(p=>({...p, open:false})); }}>{s}</button>
+            ))}
+            <div className="h-px bg-gray-100 my-1"></div>
+            <button className="w-full text-left px-3 py-2 rounded hover:bg-gray-100" onClick={()=>{ setCellByIndex(picker.di, picker.ei, ''); setPicker(p=>({...p, open:false})); }}>清空</button>
+          </div>
+        </div>
+      )}
+
+      {!user && <LoginModal onSuccess={setUser} accounts={orgConfig.accounts} />}
+    </div>
+  );
+}
+
+;(function selfTests(){
+  try{
+    const list = enumerateDates('2025-10-01','2025-10-03');
+    console.assert(list.length===3 && list[0]==='2025-10-01' && list[2]==='2025-10-03', 'enumerateDates 测试未通过');
+
+    const base = {}; enumerateDates('2025-10-06','2025-10-19').forEach(d=> base[d] = { '甲':'', '乙':'', '丙':'' });
+    const rest = { '甲':'56', '乙':'56', '丙':'56' };
+    let d0 = buildWhiteFiveTwo({ employees:['甲','乙','丙'], data:base, start:'2025-10-06', end:'2025-10-19', restPrefs:rest });
+    let alt = applyAlternateByCycle({ employees:['甲','乙','丙'], data:d0, start:'2025-10-06', end:'2025-10-19' }, 0.5);
+    let dayClamp = clampDailyByRange({ employees:['甲','乙','丙'], data:alt, start:'2025-10-06', end:'2025-10-19', rMin:0.3, rMax:0.7, maxRounds:80, mixMaxRatio:0.5 });
+    let perClamp = clampPersonByRange({ employees:['甲','乙','丙'], data:dayClamp, start:'2025-10-06', end:'2025-10-19', pMin:0.3, pMax:0.7, maxRounds:100, mixMaxRatio:0.5 });
+    let fixed = repairNoMidToWhite({ data: perClamp, employees:['甲','乙','丙'], start:'2025-10-06', end:'2025-10-19' });
+
+    let ok=true; const ds = enumerateDates('2025-10-06','2025-10-19');
+    for(let i=0;i<ds.length-1;i++){ ['甲','乙','丙'].forEach((nm)=>{ const a=fixed[ds[i]]?.[nm]; const b=fixed[ds[i+1]]?.[nm]; if(a==='中1' && b==='白'){ ok=false; } }); }
+    console.assert(ok, '出现了中1→白相邻，违例');
+
+    console.log('%c自检通过','color:green');
+  }catch(err){ globalErr('自检失败：' + (err && err.message || err)); console.error(err); }
+})();
+const mountNode = document.getElementById('root');
+if(mountNode){
+  try {
+    const root = ReactDOM.createRoot(mountNode);
+    root.render(<App/>);
+  } catch (err) {
+    globalErr('运行错误：' + (err && err.message || err));
+    console.error(err);
+  }
+}
+  
