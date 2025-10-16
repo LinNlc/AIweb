@@ -26,3 +26,8 @@
 - 拆分登录占位接口至 `app/api/auth.php`，入口仅负责路由。
 - 拆分组织配置读写至 `app/api/org_config.php`，复用工具层数据库逻辑。
 - 更新 `index.php` 顺序调用各模块路由，默认统一返回 404。
+
+## 2025-10-14 第 6 步
+- 将前端 React 逻辑迁移至 `app/public/js/main.js`，为后续拆分 UI/API/State 模块打基础。
+- 新建 `app/public/js/` 目录，按新版结构准备静态资源分层入口。
+- `index.html` 只保留样式与脚本引用，便于逐步替换为模块化加载方案。
