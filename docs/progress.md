@@ -31,3 +31,36 @@
 - 将前端 React 逻辑迁移至 `app/public/js/main.js`，为后续拆分 UI/API/State 模块打基础。
 - 新建 `app/public/js/` 目录，按新版结构准备静态资源分层入口。
 - `index.html` 只保留样式与脚本引用，便于逐步替换为模块化加载方案。
+
+## 2025-10-14 第 7 步
+- 拆分前端脚本：新增 `api.js`、`state.js`、`ui.js` 将网络请求、业务状态与通用 UI 组件从 `main.js` 中抽离。
+- 更新 `index.html` 按顺序加载新模块，确保入口脚本拿到 `window.AppAPI`、`window.AppState`、`window.AppUI`。
+- `main.js` 改为只关注应用逻辑与 React 组件装配，维持原有界面与交互。
+- 当前静态资源目录遵循目标结构：
+
+```text
+/app
+  /public               # 对外暴露：index.html、静态资源
+    index.html
+    /assets
+    /js
+      main.js           # 入口（ESM）
+      ui.js             # 只管 UI
+      api.js            # 只管请求
+      state.js          # 前端状态 & 校验
+  /api                  # PHP 接口（纯 JSON）
+    schedule.php
+    progress.php
+    versions.php
+  /core                 # 纯 PHP 业务核心（算法/规则/模型）
+    Scheduler.php
+    Rules.php
+    DTO.php
+    Utils.php
+  /storage              # 数据持久化（SQLite、JSON日志、导出文件等）
+    app.db
+    logs/
+    exports/
+  /config
+    app.php
+```
