@@ -4,7 +4,19 @@ function globalErr(msg){ const bar = document.getElementById('errbar'); if(bar){
 window.addEventListener('error', (e)=> globalErr(e?.message || '脚本错误'));
 window.addEventListener('unhandledrejection', (e)=> globalErr(e?.reason?.message || String(e?.reason || 'Promise 错误')));
 
-const { Icon, Spinner, PillBtn, Section, SideDock, TeamSwitcher, LoginModal, MonthInput, BatchAssignSection } = window.AppUI || {};
+const {
+  Icon,
+  Spinner,
+  PillBtn,
+  Section,
+  SideDock,
+  TeamSwitcher,
+  LoginModal,
+  MonthInput,
+  BatchAssignSection,
+  HistorySection,
+  SettingsSection,
+} = window.AppUI || {};
 const { API_BASE = '/api', apiGet, apiPost } = window.AppAPI || {};
 const AppState = window.AppState || {};
 const {
@@ -2150,147 +2162,58 @@ function App(){
   })();
 
   const ViewHistory = (
-    <Section title={`历史版本（${teamDisplayName}）`} right={<button onClick={loadVersions} className={`px-3 py-1.5 rounded-full text-sm text-white transition ${(editingLocked || versionsLoading)?'bg-gray-300 cursor-not-allowed':'bg-gray-800 hover:bg-gray-700'}`} disabled={editingLocked || versionsLoading}>
-      {versionsLoading ? (<span className="flex items-center gap-2"><Spinner className="w-4 h-4 text-white" /><span>刷新中…</span></span>) : '刷新列表'}
-    </button>}>
-      {versionsLoading && versions.length>0 && (
-        <div className="flex items-center gap-2 text-xs text-gray-500 mb-3">
-          <Spinner className="w-4 h-4 text-indigo-500" />
-          <span>正在刷新历史版本，请稍候…</span>
-        </div>
-      )}
-      {versionsLoading && versions.length===0 ? (
-        <div className="text-sm text-gray-500">正在加载历史版本…</div>
-      ) : versions.length===0 ? (
-        <p className="text-sm text-gray-500">当前团队「{teamDisplayName}」暂无历史版本，请在“设置 / 导出”页保存新版本或稍后刷新。</p>
-      ) : (
-        <div className="overflow-auto max-h-64">
-          <table className="text-sm w-full min-w-[780px]">
-            <thead className="bg-gray-50 text-gray-500">
-              <tr>
-                <th className="text-left py-2 px-3">版本名</th>
-                <th className="text-left py-2 px-3">团队</th>
-                <th className="text-left py-2 px-3">版本ID</th>
-                <th className="text-left py-2 px-3">保存时间</th>
-                <th className="text-left py-2 px-3">操作用户</th>
-                <th className="text-left py-2 px-3">备注</th>
-                <th className="text-left py-2 px-3">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {versions.map(v=> {
-                const name = v.note || v.name || '';
-                const remark = v.remark || v.description || '';
-                const teamName = v.team_name || v.teamName || teamDisplayName;
-                const createdAt = v.created_at || v.createdAt || '—';
-                const operator = v.created_by_name || v.created_by || '管理员';
-                const deleting = versionDeletingId === v.id;
-                return (
-                  <tr key={v.id} className="border-t hover:bg-gray-50">
-                    <td className="py-1 px-3">
-                      <div className="font-medium text-gray-900">{name || '（未命名）'}</div>
-                    </td>
-                    <td className="py-1 px-3 text-gray-600">{teamName}</td>
-                    <td className="py-1 px-3 text-gray-600">{v.id}</td>
-                    <td className="py-1 px-3 text-gray-600">{createdAt}</td>
-                    <td className="py-1 px-3 text-gray-600">{operator}</td>
-                    <td className="py-1 px-3 text-gray-600">{remark || '—'}</td>
-                    <td className="py-1 px-3">
-                      <div className="flex items-center gap-3">
-                        <button type="button" className="text-indigo-600 hover:underline disabled:text-gray-400 disabled:no-underline" onClick={()=>loadVersionById(v.id)} disabled={versionsLoading || deleting}>载入</button>
-                        <button type="button" className="flex items-center gap-1 text-rose-600 hover:underline disabled:text-rose-300 disabled:no-underline" onClick={()=>deleteVersionById(v.id)} disabled={deleting || versionsLoading}>
-                          {deleting ? (<><Spinner className="w-3.5 h-3.5 text-rose-500" /><span>删除中</span></>) : '删除'}
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </Section>
+    <HistorySection
+      teamDisplayName={teamDisplayName}
+      versions={versions}
+      versionsLoading={versionsLoading}
+      editingLocked={editingLocked}
+      versionDeletingId={versionDeletingId}
+      onRefresh={loadVersions}
+      onLoadVersion={loadVersionById}
+      onDeleteVersion={deleteVersionById}
+    />
   );
   const scheduleYearLabel = (()=>{
     const rawYear = (start || '').slice(0,4);
     return /^\d{4}$/.test(rawYear) ? rawYear : String(today.getFullYear());
   })();
+  const handleNoteChange = (value) => setNote(value);
+  const handleShiftColorChange = (shift, color) => {
+    setShiftColors((prev) => ({ ...prev, [shift]: color }));
+  };
+  const resetShiftColors = () => {
+    setShiftColors({ ...defaultShiftColors });
+  };
+  const updateAlert = (key, updater) => {
+    setStaffingAlerts((prev) => {
+      const next = normalizeStaffingAlerts(prev);
+      next[key] = { ...next[key], ...updater };
+      return next;
+    });
+  };
+  const handleAlertThresholdChange = (key, value) => updateAlert(key, { threshold: value });
+  const handleAlertLowColorChange = (key, value) => updateAlert(key, { lowColor: value });
+  const handleAlertHighColorChange = (key, value) => updateAlert(key, { highColor: value });
+  const resetStaffingAlerts = () => setStaffingAlerts(normalizeStaffingAlerts());
   const ViewSettings = (
-    <Section title="设置 / 导出">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div>
-          <label className="block text-sm text-gray-600 mb-1">保存备注</label>
-          <input className="w-full border rounded px-3 py-2" value={note}
-            onCompositionStart={()=>{}}
-            onCompositionEnd={(e)=>{ setNote(e.target.value); }}
-            onChange={e=>setNote(e.target.value)} placeholder="例如：10月第一版"/>
-        </div>
-        <div className="flex flex-wrap items-end gap-2">
-          <PillBtn onClick={saveToServer} color="emerald" disabled={editingLocked} title={editingLocked?'执行中：只读':''}>保存新版本</PillBtn>
-          <PillBtn onClick={exportExcel} color="sky" disabled={editingLocked} title={editingLocked?'执行中：只读':''}>服务器导出 Excel/CSV</PillBtn>
-        </div>
-      </div>
-      <div className="mt-6">
-        <h3 className="font-semibold mb-2">自动排班优化</h3>
-        <label className={`flex items-start gap-3 text-sm ${editingLocked?'opacity-60':''}`}>
-          <input type="checkbox" className="mt-1" checked={yearlyOptimize} disabled={editingLocked}
-            onChange={e=> setYearlyOptimize(e.target.checked)} />
-          <span>
-            <span className="font-medium text-gray-700">按当年累计班次优化</span>
-            <span className="block text-xs text-gray-500 mt-1">开启后，自动排班会参考 {scheduleYearLabel} 年 1 月至排班开始日前的历史安排，延续休息日并均衡全年班次占比。</span>
-          </span>
-        </label>
-      </div>
-      <div className="mt-6">
-        <h3 className="font-semibold mb-2">班次颜色（同步保存到浏览器）</h3>
-        <div className="flex flex-wrap gap-4 items-center text-sm">
-          {['白','中1','中2','夜','休'].map(s=> (
-            <label key={s} className={`flex items-center gap-2 ${editingLocked?'opacity-60':''}`}><span className="w-10 text-right">{s}</span><input type="color" disabled={editingLocked} value={shiftColors[s]||'#ffffff'} onChange={e=> setShiftColors(p=>({ ...p, [s]: e.target.value }))} /></label>
-          ))}
-          <button className={`px-3 py-1.5 rounded ${editingLocked?'bg-gray-200 cursor-not-allowed':'bg-gray-100 hover:bg-gray-200'}`} disabled={editingLocked} onClick={()=> setShiftColors({'白':'#eef2ff','中1':'#e0f2fe','中2':'#cffafe','夜':'#fee2e2','休':'#f3f4f6'})}>恢复默认</button>
-        </div>
-      </div>
-      <div className="mt-6 space-y-3">
-        <div className="flex items-center justify-between">
-          <h3 className="font-semibold">在岗人数提醒颜色</h3>
-          <button className={`text-xs px-2 py-1 rounded ${editingLocked?'bg-gray-200 cursor-not-allowed':'bg-gray-100 hover:bg-gray-200'}`} disabled={editingLocked} onClick={()=> setStaffingAlerts(normalizeStaffingAlerts())}>恢复默认</button>
-        </div>
-        <div className="text-xs text-gray-500">可自定义排班表中「在岗 / 白 / 中1」统计的颜色提示。例如当中1 ≤ 3 时给出醒目颜色。</div>
-        <div className="space-y-3">
-          {[
-            { key:'total', label:'在岗总人数' },
-            { key:'white', label:'白班人数' },
-            { key:'mid1', label:'中1人数' }
-          ].map(item=>{
-            const conf = staffingAlerts[item.key];
-            return (
-              <div key={item.key} className={`grid grid-cols-1 md:grid-cols-[180px_1fr] gap-3 items-center text-sm ${editingLocked?'opacity-70':''}`}>
-                <div className="font-medium text-gray-700">{item.label}</div>
-                <div className="grid grid-cols-1 md:grid-cols-[auto_auto_auto_auto] gap-2 items-center">
-                  <span className="text-xs text-gray-500">≤</span>
-                  <input type="number" className="w-20 border rounded px-2 py-1" value={conf?.threshold ?? 0} disabled={editingLocked} onChange={e=> setStaffingAlerts(prev=>{
-                    const next = normalizeStaffingAlerts(prev);
-                    next[item.key].threshold = Number(e.target.value || 0);
-                    return next;
-                  })} />
-                  <input type="color" className="w-16" disabled={editingLocked} value={conf?.lowColor || '#ffffff'} onChange={e=> setStaffingAlerts(prev=>{
-                    const next = normalizeStaffingAlerts(prev);
-                    next[item.key].lowColor = e.target.value;
-                    return next;
-                  })} />
-                  <div className="flex items-center gap-2 text-xs text-gray-500"><span>大于阈值</span><input type="color" className="w-16" disabled={editingLocked} value={conf?.highColor || '#ffffff'} onChange={e=> setStaffingAlerts(prev=>{
-                    const next = normalizeStaffingAlerts(prev);
-                    next[item.key].highColor = e.target.value;
-                    return next;
-                  })} /></div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </Section>
+    <SettingsSection
+      note={note}
+      editingLocked={editingLocked}
+      onNoteChange={handleNoteChange}
+      onSave={saveToServer}
+      onExport={exportExcel}
+      yearlyOptimize={yearlyOptimize}
+      onToggleYearlyOptimize={setYearlyOptimize}
+      scheduleYearLabel={scheduleYearLabel}
+      shiftColors={shiftColors}
+      onChangeShiftColor={handleShiftColorChange}
+      onResetShiftColors={resetShiftColors}
+      staffingAlerts={staffingAlerts}
+      onAlertThresholdChange={handleAlertThresholdChange}
+      onAlertLowColorChange={handleAlertLowColorChange}
+      onAlertHighColorChange={handleAlertHighColorChange}
+      onResetAlerts={resetStaffingAlerts}
+    />
   );
 
   const extraAccounts = orgConfig.accounts.filter(acc=> acc.username!=='admin');

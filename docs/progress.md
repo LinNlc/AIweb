@@ -107,8 +107,13 @@
 - `app/public/js/main.js` 以 `handleRunMainRule` / `handleAssignNight` 管理算法流程，仅负责状态与回调，视图渲染统一委托 UI 模块。
 - 更新错误处理以确保排班异常写入进度日志，并在 UI 模块维持原有交互体验，整体结构更贴合目标目录分层。
 
+## 2025-10-14 第 11 步
+- 将历史版本列表与设置表单提炼为 `HistorySection`、`SettingsSection`，统一放置在 `app/public/js/ui.js` 中管理视图细节。
+- `app/public/js/main.js` 通过显式传参与回调方式驱动新组件，页面主文件仅聚焦状态变更、持久化与接口调用。
+- 进度文档同步强调前端 UI 组件逐步迁移到共享模块，便于下阶段继续拆分排班表格与员工管理面板。
+
 ### 拆分总体进度速览
 - **后端接口**：`schedule.php`、`versions.php`、`auth.php`、`org_config.php` 已独立；`progress.php` 待按需补充。
 - **核心算法层**：`Scheduler.php`、`Rules.php`、`DTO.php`、`Utils.php` 完成抽离并在 API 层复用。
-- **前端静态资源**：`main.js` 仅负责状态编排；`ui.js` 承载通用组件与批量排班面板；`api.js`、`state.js` 分别负责请求与规则算法。
+- **前端静态资源**：`main.js` 仅负责状态编排；`ui.js` 已承载通用组件、批量排班面板以及历史/设置分区；`api.js`、`state.js` 分别负责请求与规则算法。
 - **配置与存储**：`config/app.php`、`storage/` 结构稳定，等待后续细化日志与导出模块。
