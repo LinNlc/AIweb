@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../core/Scheduler.php';
 require_once __DIR__ . '/../core/DTO.php';
+require_once __DIR__ . '/../core/Rules.php';
 
 /**
  * 处理排班相关的 API 路由。
@@ -34,7 +35,7 @@ function handle_schedule_request(string $method, string $path): bool
  */
 function schedule_fetch_latest(): void
 {
-    $team = (string) ($_GET['team'] ?? 'default');
+    $team = normalize_team_identifier($_GET['team'] ?? 'default');
     $start = (string) ($_GET['start'] ?? '');
     $end = (string) ($_GET['end'] ?? '');
     $historyYearStart = (string) ($_GET['historyYearStart'] ?? ($_GET['history_year_start'] ?? ''));
@@ -108,18 +109,29 @@ function schedule_fetch_latest(): void
 function schedule_save_version(): void
 {
     $in = json_input();
-    $team = (string) ($in['team'] ?? 'default');
-    $viewStart = (string) ($in['viewStart'] ?? '');
-    $viewEnd = (string) ($in['viewEnd'] ?? '');
-    $employees = $in['employees'] ?? [];
-    $data = $in['data'] ?? new stdClass();
-    $baseVersion = $in['baseVersionId'] ?? null;
-    $note = (string) ($in['note'] ?? '');
-    $operator = trim((string) ($in['operator'] ?? '管理员')) ?: '管理员';
-
-    if (!$team || !$viewStart || !$viewEnd || !is_array($employees) || !is_array($data)) {
-        send_error('参数不合法', 400);
+    try {
+        $normalized = normalize_schedule_request($in);
+    } catch (\InvalidArgumentException $e) {
+        send_error($e->getMessage(), 422);
     }
+
+    $team = $normalized['team'];
+    $viewStart = $normalized['viewStart'];
+    $viewEnd = $normalized['viewEnd'];
+    $employees = $normalized['employees'];
+    $data = $normalized['data'];
+    $baseVersion = $normalized['baseVersionId'];
+    $note = $normalized['note'];
+    $operator = $normalized['operator'];
+
+    $cleanInput = $in;
+    $cleanInput['team'] = $team;
+    $cleanInput['viewStart'] = $viewStart;
+    $cleanInput['viewEnd'] = $viewEnd;
+    $cleanInput['employees'] = $employees;
+    $cleanInput['data'] = $data;
+    $cleanInput['note'] = $note;
+    $cleanInput['operator'] = $operator;
 
     $pdo = db();
     $stmt = $pdo->prepare(
@@ -138,7 +150,7 @@ function schedule_save_version(): void
         ]);
     }
 
-    $snapshot = build_snapshot_payload($in, $team, $viewStart, $viewEnd, $employees, $data, $note, $operator);
+    $snapshot = build_snapshot_payload($cleanInput, $team, $viewStart, $viewEnd, $employees, $data, $note, $operator);
     $snapshotJson = json_encode($snapshot, JSON_UNESCAPED_UNICODE);
     if ($snapshotJson === false) {
         $snapshotJson = json_encode($snapshot, JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR) ?: '{}';
