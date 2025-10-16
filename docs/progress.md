@@ -96,3 +96,8 @@
   /config
     app.php             # 全局配置（时区、超时、日志级别等）
 ```
+
+## 2025-10-14 第 9 步
+- 将导航栏、团队选择、登录弹窗与月份输入框等通用 React 组件迁移至 `app/public/js/ui.js`，入口脚本通过 `window.AppUI` 解构调用。
+- 精简 `app/public/js/main.js`，仅保留应用状态与业务逻辑，后续可继续拆分具体业务面板。
+- 目录结构保持与目标一致，继续沿用 `/app/public/js/{api,state,ui,main}.js` 前端分层与 `/app/core` 核心算法模块。
