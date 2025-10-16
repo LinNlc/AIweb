@@ -101,3 +101,14 @@
 - 将导航栏、团队选择、登录弹窗与月份输入框等通用 React 组件迁移至 `app/public/js/ui.js`，入口脚本通过 `window.AppUI` 解构调用。
 - 精简 `app/public/js/main.js`，仅保留应用状态与业务逻辑，后续可继续拆分具体业务面板。
 - 目录结构保持与目标一致，继续沿用 `/app/public/js/{api,state,ui,main}.js` 前端分层与 `/app/core` 核心算法模块。
+
+## 2025-10-14 第 10 步
+- 在 `app/public/js/ui.js` 新增 `BatchAssignSection` 以及人员列表、规则与夜班工具子组件，让批量排班 UI 与业务逻辑彻底解耦。
+- `app/public/js/main.js` 以 `handleRunMainRule` / `handleAssignNight` 管理算法流程，仅负责状态与回调，视图渲染统一委托 UI 模块。
+- 更新错误处理以确保排班异常写入进度日志，并在 UI 模块维持原有交互体验，整体结构更贴合目标目录分层。
+
+### 拆分总体进度速览
+- **后端接口**：`schedule.php`、`versions.php`、`auth.php`、`org_config.php` 已独立；`progress.php` 待按需补充。
+- **核心算法层**：`Scheduler.php`、`Rules.php`、`DTO.php`、`Utils.php` 完成抽离并在 API 层复用。
+- **前端静态资源**：`main.js` 仅负责状态编排；`ui.js` 承载通用组件与批量排班面板；`api.js`、`state.js` 分别负责请求与规则算法。
+- **配置与存储**：`config/app.php`、`storage/` 结构稳定，等待后续细化日志与导出模块。

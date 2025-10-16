@@ -1,5 +1,5 @@
 // UI 组件模块：集中存放可复用的 React 视图组件
-const { useState, useEffect } = React;
+const { useState, useEffect, useMemo, useRef } = React;
 
 // 基础图标集合，供业务面板引用
 const Icon = ({ name, className = '' }) => {
@@ -247,6 +247,426 @@ const LoginModal = ({ onSuccess, accounts }) => {
   );
 };
 
+// 人员批量选择列表，提供搜索与批量勾选功能
+const EmployeeChecklist = ({ employees, batchChecked, setBatchChecked, editingLocked }) => {
+  const [keyword, setKeyword] = useState('');
+  const filtered = useMemo(() => {
+    const kw = keyword.trim().toLowerCase();
+    if (!kw) {
+      return employees;
+    }
+    return employees.filter((name) => name.toLowerCase().includes(kw));
+  }, [keyword, employees]);
+  const listRef = useRef(null);
+
+  const withScrollRestore = (cb) => {
+    const node = listRef.current;
+    const top = node ? node.scrollTop : 0;
+    const left = node ? node.scrollLeft : 0;
+    cb();
+    requestAnimationFrame(() => {
+      const current = listRef.current;
+      if (current) {
+        current.scrollTop = top;
+        current.scrollLeft = left;
+      }
+    });
+  };
+
+  const selectedCount = filtered.filter((name) => !!batchChecked[name]).length;
+
+  return (
+    <div className="border rounded-xl p-3">
+      <input
+        className="border rounded px-2 py-1 text-sm w-full mb-2"
+        placeholder="搜索姓名…"
+        value={keyword}
+        onChange={(e) => setKeyword(e.target.value)}
+      />
+      <div className="flex items-center justify-between text-xs text-gray-600 mb-2">
+        <div>
+          当前筛选：{filtered.length} 人；已选 {selectedCount} 人
+        </div>
+        <div className="space-x-2">
+          <button
+            className={`px-2 py-1 rounded border ${editingLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
+            disabled={editingLocked}
+            onClick={() =>
+              withScrollRestore(() => {
+                const next = { ...batchChecked };
+                filtered.forEach((name) => {
+                  next[name] = true;
+                });
+                setBatchChecked(next);
+              })
+            }
+          >
+            全选
+          </button>
+          <button
+            className={`px-2 py-1 rounded border ${editingLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
+            disabled={editingLocked}
+            onClick={() =>
+              withScrollRestore(() =>
+                setBatchChecked((prev) => {
+                  const next = { ...prev };
+                  filtered.forEach((name) => {
+                    next[name] = !prev[name];
+                  });
+                  return next;
+                })
+              )
+            }
+          >
+            反选
+          </button>
+          <button
+            className={`px-2 py-1 rounded border ${editingLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
+            disabled={editingLocked}
+            onClick={() =>
+              withScrollRestore(() =>
+                setBatchChecked((prev) => {
+                  const next = { ...prev };
+                  filtered.forEach((name) => {
+                    next[name] = false;
+                  });
+                  return next;
+                })
+              )
+            }
+          >
+            清空
+          </button>
+        </div>
+      </div>
+      <div ref={listRef} className="max-h-64 overflow-auto divide-y">
+        {filtered.map((name) => (
+          <label key={name} className="flex items-center gap-2 py-1">
+            <input
+              type="checkbox"
+              disabled={editingLocked}
+              checked={!!batchChecked[name]}
+              onChange={() =>
+                withScrollRestore(() =>
+                  setBatchChecked((prev) => ({ ...prev, [name]: !prev[name] }))
+                )
+              }
+            />
+            <span className="text-sm">{name}</span>
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// 主自动排班规则配置面板
+const MainRulePanel = ({
+  rMin,
+  rMax,
+  pMin,
+  pMax,
+  mixMax,
+  setRMin,
+  setRMax,
+  setPMin,
+  setPMax,
+  setMixMax,
+  progRunning,
+  onRunMainRule,
+}) => (
+  <div className="bg-white rounded-xl border p-3 space-y-3">
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+      <div className="space-y-2">
+        <div className="font-medium text-gray-700">每日比例（中1:白）</div>
+        <div className="flex items-center gap-2">
+          <span>1 :</span>
+          <input
+            type="number"
+            step="0.05"
+            min="0"
+            max="3"
+            className="w-24 border rounded px-2 py-1"
+            value={rMin}
+            onChange={(e) => setRMin(Math.max(0, Math.min(3, parseFloat(e.target.value || '0'))))}
+          />
+          <span>~</span>
+          <input
+            type="number"
+            step="0.05"
+            min="0"
+            max="3"
+            className="w-24 border rounded px-2 py-1"
+            value={rMax}
+            onChange={(e) => setRMax(Math.max(0, Math.min(3, parseFloat(e.target.value || '0'))))}
+          />
+          <span className="text-gray-400">（示例：1:0.4~0.6）</span>
+        </div>
+      </div>
+      <div className="space-y-2">
+        <div className="font-medium text-gray-700">个人比例（中1:白）</div>
+        <div className="flex items-center gap-2">
+          <span>1 :</span>
+          <input
+            type="number"
+            step="0.05"
+            min="0"
+            max="3"
+            className="w-24 border rounded px-2 py-1"
+            value={pMin}
+            onChange={(e) => setPMin(Math.max(0, Math.min(3, parseFloat(e.target.value || '0'))))}
+          />
+          <span>~</span>
+          <input
+            type="number"
+            step="0.05"
+            min="0"
+            max="3"
+            className="w-24 border rounded px-2 py-1"
+            value={pMax}
+            onChange={(e) => setPMax(Math.max(0, Math.min(3, parseFloat(e.target.value || '0'))))}
+          />
+          <span className="text-gray-400">（示例：1:0.4~0.6）</span>
+        </div>
+      </div>
+    </div>
+    <div className="space-y-2">
+      <div className="font-medium text-gray-700">混合周期上限（比例）</div>
+      <div className="flex items-center gap-2 text-sm">
+        <span>混合周期 ≤ 总周期 ×</span>
+        <input
+          type="number"
+          step="0.05"
+          min="0"
+          max="1"
+          className="w-24 border rounded px-2 py-1"
+          value={mixMax}
+          onChange={(e) => setMixMax(Math.max(0, Math.min(1, parseFloat(e.target.value || '0'))))}
+        />
+        <span className="text-gray-400">（例如：0.5 表示有白且有中的周期不超过一半）</span>
+      </div>
+    </div>
+
+    <div className="flex flex-wrap items-center gap-3">
+      <PillBtn color="indigo" onClick={onRunMainRule} disabled={progRunning}>
+        开始自动排班
+      </PillBtn>
+    </div>
+
+    <div className="text-xs text-gray-500">
+      规则说明：① 全程禁止生成“中1→白”相邻；② 严格遵守最多 6 天连续上班；③ 混合周期（白+中1 同在一周期）不超过设定比例；④ 夜/中2 不参与本算法但保留；⑤ 多轮“按天→按人”收敛，优先确保你的目标约束而非速度。
+    </div>
+  </div>
+);
+
+// 夜班辅助工具面板
+const NightPanel = ({
+  nightWindows,
+  setNightWindows,
+  nightOverride,
+  setNightOverride,
+  nightRules,
+  setNightRules,
+  start,
+  end,
+  onAssignNight,
+  editingLocked,
+  hasSelection,
+}) => (
+  <div className="bg-white rounded-xl border p-3">
+    <h4 className="font-medium mb-2">夜班窗口（每天尽量有 夜 + 中2）</h4>
+    <div className="space-y-2">
+      {nightWindows.map((win, idx) => (
+        <div key={idx} className="flex flex-wrap items-end gap-2">
+          <label className="text-sm">
+            开始
+            <input
+              type="date"
+              value={win.s}
+              onChange={(e) =>
+                setNightWindows((arr) => {
+                  const next = [...arr];
+                  next[idx] = { ...next[idx], s: e.target.value };
+                  return next;
+                })
+              }
+              className="border rounded px-2 py-1 ml-1"
+            />
+          </label>
+          <label className="text-sm">
+            结束
+            <input
+              type="date"
+              value={win.e}
+              onChange={(e) =>
+                setNightWindows((arr) => {
+                  const next = [...arr];
+                  next[idx] = { ...next[idx], e: e.target.value };
+                  return next;
+                })
+              }
+              className="border rounded px-2 py-1 ml-1"
+            />
+          </label>
+          <button className="px-2 py-1 border rounded" onClick={() => setNightWindows((arr) => arr.filter((_, i) => i !== idx))}>
+            删除
+          </button>
+        </div>
+      ))}
+      <button className="px-3 py-1.5 border rounded" onClick={() => setNightWindows((arr) => [...arr, { s: start, e: end }])}>
+        新增一段
+      </button>
+    </div>
+
+    <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+      <label className="inline-flex items-center gap-2">
+        <input type="checkbox" checked={nightOverride} onChange={(e) => setNightOverride(e.target.checked)} /> 应用夜/中2时允许覆盖现有班次
+      </label>
+      <label className="inline-flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={nightRules.prioritizeInterval}
+          onChange={(e) => setNightRules((prev) => ({ ...prev, prioritizeInterval: e.target.checked }))}
+        />
+        夜班按间隔优先分配
+      </label>
+      <label className="inline-flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={nightRules.restAfterNight}
+          onChange={(e) => setNightRules((prev) => ({ ...prev, restAfterNight: e.target.checked }))}
+        />
+        夜班后休息 2 天
+      </label>
+      <label className="inline-flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={nightRules.enforceRestCap}
+          onChange={(e) => setNightRules((prev) => ({ ...prev, enforceRestCap: e.target.checked }))}
+        />
+        夜后休息不超过 2 天
+      </label>
+      <label className="inline-flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={nightRules.restAfterMid2}
+          onChange={(e) => setNightRules((prev) => ({ ...prev, restAfterMid2: e.target.checked }))}
+        />
+        中2 后休息 2 天
+      </label>
+      <label className="inline-flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={nightRules.allowDoubleMid2}
+          onChange={(e) => setNightRules((prev) => ({ ...prev, allowDoubleMid2: e.target.checked }))}
+        />
+        允许连续 2 个中2
+      </label>
+      <label className="inline-flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={nightRules.allowNightDay4}
+          onChange={(e) => setNightRules((prev) => ({ ...prev, allowNightDay4: e.target.checked }))}
+        />
+        支持周期第 4 天排夜班
+      </label>
+    </div>
+
+    <div className="flex flex-wrap items-center gap-3 mt-3 text-sm">
+      <PillBtn
+        color="emerald"
+        onClick={onAssignNight}
+        title={!hasSelection ? '请先勾选人员' : editingLocked ? '执行中：只读' : ''}
+      >
+        AI 一键分配 夜/中2（按窗口，多段）
+      </PillBtn>
+      <span className="text-xs text-gray-500">规则：夜后两天必须休；夜后两天禁止该员工中2；中2后一天强制休。</span>
+    </div>
+  </div>
+);
+
+// 自动排班组合面板，整合人员选择 + 规则 + 夜班工具
+const BatchAssignSection = ({
+  employees,
+  batchChecked,
+  setBatchChecked,
+  editingLocked,
+  progRunning,
+  rMin,
+  rMax,
+  pMin,
+  pMax,
+  mixMax,
+  setRMin,
+  setRMax,
+  setPMin,
+  setPMax,
+  setMixMax,
+  nightWindows,
+  setNightWindows,
+  nightOverride,
+  setNightOverride,
+  nightRules,
+  setNightRules,
+  start,
+  end,
+  onRunMainRule,
+  onAssignNight,
+  hasSelection,
+}) => (
+  <Section
+    title="自动分配班次"
+    right={
+      editingLocked ? (
+        <span className="text-rose-600 text-sm inline-flex items-center gap-1">
+          <Icon name="lock" />执行中：只读浏览
+        </span>
+      ) : null
+    }
+  >
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
+      <div className="lg:col-span-1">
+        <h3 className="font-medium mb-2">选择人员</h3>
+        <EmployeeChecklist
+          employees={employees}
+          batchChecked={batchChecked}
+          setBatchChecked={setBatchChecked}
+          editingLocked={editingLocked}
+        />
+      </div>
+      <div className="lg:col-span-2 space-y-4">
+        <MainRulePanel
+          rMin={rMin}
+          rMax={rMax}
+          pMin={pMin}
+          pMax={pMax}
+          mixMax={mixMax}
+          setRMin={setRMin}
+          setRMax={setRMax}
+          setPMin={setPMin}
+          setPMax={setPMax}
+          setMixMax={setMixMax}
+          progRunning={progRunning}
+          onRunMainRule={onRunMainRule}
+        />
+        <NightPanel
+          nightWindows={nightWindows}
+          setNightWindows={setNightWindows}
+          nightOverride={nightOverride}
+          setNightOverride={setNightOverride}
+          nightRules={nightRules}
+          setNightRules={setNightRules}
+          start={start}
+          end={end}
+          onAssignNight={onAssignNight}
+          editingLocked={editingLocked}
+          hasSelection={hasSelection}
+        />
+      </div>
+    </div>
+  </Section>
+);
+
 // 月份输入框：支持键盘输入自动格式化
 const MonthInput = React.memo(function MonthInputComponent({
   value,
@@ -325,4 +745,4 @@ const MonthInput = React.memo(function MonthInputComponent({
 });
 
 // 导出给入口脚本使用
-window.AppUI = { Icon, Spinner, PillBtn, Section, SideDock, TeamSwitcher, LoginModal, MonthInput };
+window.AppUI = { Icon, Spinner, PillBtn, Section, SideDock, TeamSwitcher, LoginModal, MonthInput, BatchAssignSection };

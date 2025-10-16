@@ -4,7 +4,7 @@ function globalErr(msg){ const bar = document.getElementById('errbar'); if(bar){
 window.addEventListener('error', (e)=> globalErr(e?.message || '脚本错误'));
 window.addEventListener('unhandledrejection', (e)=> globalErr(e?.reason?.message || String(e?.reason || 'Promise 错误')));
 
-const { Icon, Spinner, PillBtn, Section, SideDock, TeamSwitcher, LoginModal, MonthInput } = window.AppUI || {};
+const { Icon, Spinner, PillBtn, Section, SideDock, TeamSwitcher, LoginModal, MonthInput, BatchAssignSection } = window.AppUI || {};
 const { API_BASE = '/api', apiGet, apiPost } = window.AppAPI || {};
 const AppState = window.AppState || {};
 const {
@@ -926,36 +926,6 @@ function App(){
     </Section>
   );
 
-  function EmployeeChecklist(){
-    const [kw, setKw] = useState('');
-    const filtered = useMemo(()=>{ const k = kw.trim().toLowerCase(); return k ? employees.filter(e=> e.toLowerCase().includes(k)) : employees; }, [kw, employees]);
-    const listRef = useRef(null);
-    const withStay = (cb)=>{ const el=listRef.current; const st=el?el.scrollTop:0; const sl=el?el.scrollLeft:0; cb(); requestAnimationFrame(()=>{ const node=listRef.current; if(node){ node.scrollTop = st; node.scrollLeft = sl; } }); };
-    const selectedCount = filtered.filter(n=> !!batchChecked[n]).length;
-    const allSelected = filtered.length>0 && selectedCount===filtered.length;
-    return (
-      <div className="border rounded-xl p-3">
-        <input className="border rounded px-2 py-1 text-sm w-full mb-2" placeholder="搜索姓名…" value={kw} onChange={e=>setKw(e.target.value)} />
-        <div className="flex items-center justify-between text-xs text-gray-600 mb-2">
-          <div>当前筛选：{filtered.length} 人；已选 {selectedCount} 人</div>
-          <div className="space-x-2">
-            <button className={`px-2 py-1 rounded border ${editingLocked?'opacity-50 cursor-not-allowed':''}`} disabled={editingLocked} onClick={()=> withStay(()=>{ const next={...batchChecked}; filtered.forEach(n=> next[n]=true); setBatchChecked(next); })}>全选</button>
-            <button className={`px-2 py-1 rounded border ${editingLocked?'opacity-50 cursor-not-allowed':''}`} disabled={editingLocked} onClick={()=> withStay(()=> setBatchChecked(prev=>{ const next={...prev}; filtered.forEach(n=> next[n]=!prev[n]); return next; }))}>反选</button>
-            <button className={`px-2 py-1 rounded border ${editingLocked?'opacity-50 cursor-not-allowed':''}`} disabled={editingLocked} onClick={()=> withStay(()=> setBatchChecked(prev=>{ const next={...prev}; filtered.forEach(n=> { next[n]=false; }); return next; }))}>清空</button>
-          </div>
-        </div>
-        <div ref={listRef} className="max-h-64 overflow-auto divide-y">
-          {filtered.map(name=> (
-            <label key={name} className="flex items-center gap-2 py-1">
-              <input type="checkbox" disabled={editingLocked} checked={!!batchChecked[name]} onChange={()=> withStay(()=> setBatchChecked(p=>({ ...p, [name]: !p[name] })))} />
-              <span className="text-sm">{name}</span>
-            </label>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
   function AlbumEmployeeChecklist(){
     const [kw, setKw] = useState('');
     const filtered = useMemo(()=>{ const k = kw.trim().toLowerCase(); return k? employees.filter(e=> e.toLowerCase().includes(k)) : employees; }, [kw, employees]);
@@ -992,131 +962,112 @@ function App(){
     );
   }
 
-  function MainRulePanel(){
-    async function runMainRule(){
-      const targets = checkedList.length? checkedList : employees;
-      if(targets.length===0){ alert('请先勾选人员'); return; }
+  const handleRunMainRule = async () => {
+    const targets = checkedList.length ? checkedList : employees;
+    if (targets.length === 0) {
+      alert('请先勾选人员');
+      return;
+    }
 
+    try {
       const prioritizedTargets = sortedByHistory(targets, historyProfile);
 
       setStage('阶段 1/6：拉齐白班（5白+2休）', 10, 100);
       let cur = buildWhiteFiveTwo({ employees: prioritizedTargets, data, start, end, restPrefs });
-      setData(cur); await new Promise(r=>setTimeout(r, 20));
+      setData(cur);
+      await new Promise((resolve) => setTimeout(resolve, 20));
 
       setStage('阶段 2/6：按周期交替错开放中班', 30, 100);
       cur = applyAlternateByCycle({ employees: prioritizedTargets, data: cur, start, end }, mixMax);
-      setData(cur); await new Promise(r=>setTimeout(r, 20));
+      setData(cur);
+      await new Promise((resolve) => setTimeout(resolve, 20));
 
       setStage('阶段 3/6：按天比例收敛', 55, 100);
       cur = clampDailyByRange({ employees: prioritizedTargets, data: cur, start, end, rMin, rMax, maxRounds: 300, mixMaxRatio: mixMax });
-      setData(cur); await new Promise(r=>setTimeout(r, 20));
+      setData(cur);
+      await new Promise((resolve) => setTimeout(resolve, 20));
 
       setStage('阶段 4/6：个人比例收敛', 78, 100);
-      for(let sweep=0; sweep<8; sweep++){
+      for (let sweep = 0; sweep < 8; sweep++) {
         cur = clampDailyByRange({ employees: prioritizedTargets, data: cur, start, end, rMin, rMax, maxRounds: 220, mixMaxRatio: mixMax });
         cur = clampPersonByRange({ employees: prioritizedTargets, data: cur, start, end, pMin, pMax, maxRounds: 260, mixMaxRatio: mixMax });
-        pushLog(`循环微调：第 ${sweep+1} 轮`);
+        pushLog(`循环微调：第 ${sweep + 1} 轮`);
       }
-      setData(cur); await new Promise(r=>setTimeout(r, 20));
+      setData(cur);
+      await new Promise((resolve) => setTimeout(resolve, 20));
 
       setStage('阶段 5/6：参考历史与行政天数调整', 92, 100);
       cur = adjustWithHistory({ data: cur, employees: prioritizedTargets, start, end, adminDays, historyProfile, mixMaxRatio: mixMax, yearlyOptimize });
-      setData(cur); await new Promise(r=>setTimeout(r, 20));
+      setData(cur);
+      await new Promise((resolve) => setTimeout(resolve, 20));
 
       setStage('阶段 6/6：校验并微调', 98, 100);
       cur = repairNoMidToWhite({ data: cur, employees: prioritizedTargets, start, end });
       setData(cur);
 
       endStage();
+    } catch (error) {
+      console.error('自动排班失败', error);
+      pushLog(`错误：${error?.message || error}`);
+      setProg({ running: false, stage: '失败', done: 0, total: 100 });
+      alert(error?.message ? `自动排班失败：${error.message}` : '自动排班失败');
     }
+  };
 
-    return (
-      <div className="bg-white rounded-xl border p-3 space-y-3">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-          <div className="space-y-2">
-            <div className="font-medium text-gray-700">每日比例（中1:白）</div>
-            <div className="flex items-center gap-2">
-              <span>1 :</span>
-              <input type="number" step="0.05" min="0" max="3" className="w-24 border rounded px-2 py-1" value={rMin} onChange={(e)=> setRMin(Math.max(0, Math.min(3, parseFloat(e.target.value||'0'))))} />
-              <span>~</span>
-              <input type="number" step="0.05" min="0" max="3" className="w-24 border rounded px-2 py-1" value={rMax} onChange={(e)=> setRMax(Math.max(0, Math.min(3, parseFloat(e.target.value||'0'))))} />
-              <span className="text-gray-400">（示例：1:0.4~0.6）</span>
-            </div>
-          </div>
-          <div className="space-y-2">
-            <div className="font-medium text-gray-700">个人比例（中1:白）</div>
-            <div className="flex items-center gap-2">
-              <span>1 :</span>
-              <input type="number" step="0.05" min="0" max="3" className="w-24 border rounded px-2 py-1" value={pMin} onChange={(e)=> setPMin(Math.max(0, Math.min(3, parseFloat(e.target.value||'0'))))} />
-              <span>~</span>
-              <input type="number" step="0.05" min="0" max="3" className="w-24 border rounded px-2 py-1" value={pMax} onChange={(e)=> setPMax(Math.max(0, Math.min(3, parseFloat(e.target.value||'0'))))} />
-              <span className="text-gray-400">（示例：1:0.4~0.6）</span>
-            </div>
-          </div>
-        </div>
-        <div className="space-y-2">
-          <div className="font-medium text-gray-700">混合周期上限（比例）</div>
-          <div className="flex items-center gap-2 text-sm">
-            <span>混合周期 ≤ 总周期 ×</span>
-            <input type="number" step="0.05" min="0" max="1" className="w-24 border rounded px-2 py-1" value={mixMax} onChange={(e)=> setMixMax(Math.max(0, Math.min(1, parseFloat(e.target.value||'0'))))} />
-            <span className="text-gray-400">（例如：0.5 表示有白且有中的周期不超过一半）</span>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3">
-          <PillBtn color="indigo" onClick={runMainRule} disabled={prog.running}>开始自动排班</PillBtn>
-        </div>
-
-        <div className="text-xs text-gray-500">规则说明：① 全程禁止生成“中1→白”相邻；② 严格遵守最多 6 天连续上班；③ 混合周期（白+中1 同在一周期）不超过设定比例；④ 夜/中2 不参与本算法但保留；⑤ 多轮“按天→按人”收敛，优先确保你的目标约束而非速度。</div>
-      </div>
-    );
-  }
-
-  function NightPanel(){
-    return (
-      <div className="bg-white rounded-xl border p-3">
-        <h4 className="font-medium mb-2">夜班窗口（每天尽量有 夜 + 中2）</h4>
-        <div className="space-y-2">
-          {nightWindows.map((w,i)=> (
-            <div key={i} className="flex flex-wrap items-end gap-2">
-              <label className="text-sm">开始 <input type="date" value={w.s} onChange={e=> setNightWindows(arr=>{ const a=[...arr]; a[i]={...a[i], s:e.target.value}; return a; })} className="border rounded px-2 py-1 ml-1"/></label>
-              <label className="text-sm">结束 <input type="date" value={w.e} onChange={e=> setNightWindows(arr=>{ const a=[...arr]; a[i]={...a[i], e:e.target.value}; return a; })} className="border rounded px-2 py-1 ml-1"/></label>
-              <button className="px-2 py-1 border rounded" onClick={()=> setNightWindows(arr=> arr.filter((_,idx)=> idx!==i))}>删除</button>
-            </div>
-          ))}
-          <button className="px-3 py-1.5 border rounded" onClick={()=> setNightWindows(a=> [...a, {s:start,e:end}])}>新增一段</button>
-        </div>
-
-        <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-          <label className="inline-flex items-center gap-2"><input type="checkbox" checked={nightOverride} onChange={e=> setNightOverride(e.target.checked)} /> 应用夜/中2时允许覆盖现有班次</label>
-          <label className="inline-flex items-center gap-2"><input type="checkbox" checked={nightRules.prioritizeInterval} onChange={e=> setNightRules(r=>({...r, prioritizeInterval:e.target.checked}))}/> 夜班按间隔优先分配</label>
-          <label className="inline-flex items-center gap-2"><input type="checkbox" checked={nightRules.restAfterNight} onChange={e=> setNightRules(r=>({...r, restAfterNight:e.target.checked}))}/> 夜班后休息 2 天</label>
-          <label className="inline-flex items-center gap-2"><input type="checkbox" checked={nightRules.enforceRestCap} onChange={e=> setNightRules(r=>({...r, enforceRestCap:e.target.checked}))}/> 夜后休息不超过 2 天</label>
-          <label className="inline-flex items-center gap-2"><input type="checkbox" checked={nightRules.restAfterMid2} onChange={e=> setNightRules(r=>({...r, restAfterMid2:e.target.checked}))}/> 中2 后休息 2 天</label>
-          <label className="inline-flex items-center gap-2"><input type="checkbox" checked={nightRules.allowDoubleMid2} onChange={e=> setNightRules(r=>({...r, allowDoubleMid2:e.target.checked}))}/> 允许连续 2 个中2</label>
-          <label className="inline-flex items-center gap-2"><input type="checkbox" checked={nightRules.allowNightDay4} onChange={e=> setNightRules(r=>({...r, allowNightDay4:e.target.checked}))}/> 支持周期第 4 天排夜班</label>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3 mt-3 text-sm">
-          <PillBtn color="emerald" onClick={()=>{
-            if(checkedList.length===0){ alert('请先勾选人员'); return; }
-            let newD={...data};
-            for(const w of nightWindows){ if(!w.s||!w.e) continue; newD = autoAssignNightAndM2({ employees: checkedList, data:newD, start:w.s, end:w.e, override: nightOverride, nightRules, restPrefs }); }
-            setData(newD);
-          }}>AI 一键分配 夜/中2（按窗口，多段）</PillBtn>
-          <span className="text-xs text-gray-500">规则：夜后两天必须休；夜后两天禁止该员工中2；中2后一天强制休。</span>
-        </div>
-      </div>
-    );
-  }
+  const handleAssignNight = () => {
+    if (editingLocked) {
+      alert('执行中：请稍后再试');
+      return;
+    }
+    if (checkedList.length === 0) {
+      alert('请先勾选人员');
+      return;
+    }
+    let nextData = { ...data };
+    for (const win of nightWindows) {
+      if (!win.s || !win.e) continue;
+      nextData = autoAssignNightAndM2({
+        employees: checkedList,
+        data: nextData,
+        start: win.s,
+        end: win.e,
+        override: nightOverride,
+        nightRules,
+        restPrefs,
+      });
+    }
+    setData(nextData);
+  };
 
   const ViewBatch = (
-    <Section title="自动分配班次" right={editingLocked? <span className='text-rose-600 text-sm inline-flex items-center gap-1'><Icon name='lock'/>执行中：只读浏览</span>: null}>
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
-        <div className="lg:col-span-1"><h3 className="font-medium mb-2">选择人员</h3><EmployeeChecklist/></div>
-        <div className="lg:col-span-2 space-y-4"><MainRulePanel/><NightPanel/></div>
-      </div>
-    </Section>
+    <BatchAssignSection
+      employees={employees}
+      batchChecked={batchChecked}
+      setBatchChecked={setBatchChecked}
+      editingLocked={editingLocked}
+      progRunning={prog.running}
+      rMin={rMin}
+      rMax={rMax}
+      pMin={pMin}
+      pMax={pMax}
+      mixMax={mixMax}
+      setRMin={setRMin}
+      setRMax={setRMax}
+      setPMin={setPMin}
+      setPMax={setPMax}
+      setMixMax={setMixMax}
+      nightWindows={nightWindows}
+      setNightWindows={setNightWindows}
+      nightOverride={nightOverride}
+      setNightOverride={setNightOverride}
+      nightRules={nightRules}
+      setNightRules={setNightRules}
+      start={start}
+      end={end}
+      onRunMainRule={handleRunMainRule}
+      onAssignNight={handleAssignNight}
+      hasSelection={checkedList.length > 0}
+    />
   );
 
   const albumRange = useMemo(()=>{
