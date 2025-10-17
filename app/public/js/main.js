@@ -14,6 +14,7 @@ const {
   LoginModal,
   MonthInput,
   BatchAssignSection,
+  ScheduleGridSection,
   HistorySection,
   SettingsSection,
 } = window.AppUI || {};
@@ -823,12 +824,6 @@ function App(){
   }, [tab, team]);
 
   const dateList = useMemo(()=> enumerateDates(start, end), [start,end]);
-  const activeCellRef = useRef(null);
-  function setCellByIndex(dIndex, eIndex, value){ const d = dateList[dIndex]; const emp = employees[eIndex]; if(!d||!emp) return; setData(prev=>{ const next = { ...prev }; const row = { ...(next[d]||{}) }; row[emp] = value; next[d] = row; return next; }); }
-  function onFocusCell(dIndex, eIndex){ activeCellRef.current = { dIndex, eIndex }; }
-  function moveActive(dx, dy){ const cur = activeCellRef.current || { dIndex:0, eIndex:0 }; const ni = Math.max(0, Math.min((cur.dIndex||0) + dy, dateList.length-1)); const nj = Math.max(0, Math.min((cur.eIndex||0) + dx, employees.length-1)); activeCellRef.current = { dIndex: ni, eIndex: nj }; const id = `cell-${ni}-${nj}`; const el = document.getElementById(id); if(el) el.focus(); }
-  function openPickerAt(di, ei, anchorEl){ if(editingLocked) return; const el = anchorEl || document.getElementById(`cell-${di}-${ei}`); if(!el) return; const rect = el.getBoundingClientRect(); setPicker({ open:true, di, ei, x: rect.left + window.scrollX, y: rect.bottom + window.scrollY + 4 }); }
-  function onKeyDownCell(e, di, ei){ if(e.isComposing) return; if(e.altKey && (e.key==='ArrowDown' || e.key==='Enter')){ e.preventDefault(); openPickerAt(di, ei, e.currentTarget); return; } if(e.key==='Enter'){ e.preventDefault(); moveActive(1,0); } else if(e.key==='ArrowRight'){ e.preventDefault(); moveActive(1,0); } else if(e.key==='ArrowLeft'){ e.preventDefault(); moveActive(-1,0); } else if(e.key==='ArrowDown'){ e.preventDefault(); moveActive(0,1); } else if(e.key==='ArrowUp'){ e.preventDefault(); moveActive(0,-1); } }
 
   function clearRange(mode='empty'){
     setData(prev=>{ const next={...prev}; for(const d of dateList){ const r={...(next[d]||{})}; for(const e of employees){ r[e] = (mode==='rest')? '休' : ''; } next[d]=r; } return next; });
@@ -838,104 +833,26 @@ function App(){
 
   const nightIssues = useMemo(()=>{ const issues={}; function inAnyWin(day){ for(const w of nightWindows){ if(!w.s||!w.e) continue; if(day>=w.s && day<=w.e) return true; } return false; } for(const d of dateList){ if(!inAnyWin(d)) continue; const row=data[d]||{}; const vals=Object.values(row); const hasN = vals.includes('夜'); const hasM2 = vals.includes('中2'); let msg=''; if(!hasN && !hasM2) msg='缺夜&中2'; else if(!hasN) msg='缺夜'; else if(!hasM2) msg='缺中2'; if(msg) issues[d]=msg; } return issues; }, [nightWindows, data, dateList]);
 
-  // —— 新增：全局单个浮动班次选择器 ——
-  const [picker, setPicker] = useState({ open:false, di:null, ei:null, x:0, y:0 });
-  const pickerRef = useRef(null);
-  useEffect(()=>{
-    function onDocDown(ev){ if(!picker.open) return; if(pickerRef.current && !pickerRef.current.contains(ev.target)) setPicker(p=>({...p, open:false})); }
-    document.addEventListener('mousedown', onDocDown);
-    return ()=> document.removeEventListener('mousedown', onDocDown);
-  }, [picker.open]);
-
   const gridEmpCounts = useMemo(()=> countByEmpInRange(employees, data, start, end), [employees, data, start, end]);
 
   const ViewGrid = (
-    <Section title="排班表格" right={<span className="text-sm text-gray-500">提示：点击单元格→直接输入或从 Excel 粘贴；支持 IME 连续输入 {editingLocked && <span className='inline-flex items-center gap-1 text-rose-600 ml-2'><Icon name='lock'/>执行中：只读</span>}</span>}>
-      {employees.length===0 ? (
-        <div className="text-sm text-gray-500">请先在「员工管理」中添加员工。</div>
-      ) : (
-        <>
-          <div className="grid-wrap border rounded-xl shadow-inner" onPaste={(e)=>{ if(editingLocked) return; const cur = activeCellRef.current; if(!cur) return; const text = e.clipboardData.getData('text'); if(!text) return; e.preventDefault(); const rows = text.replace(/\r/g,'').split('\n').filter(x=>x.length>0).map(r=>r.split(/\t|,/)); const baseI = cur.eIndex; const baseD = cur.dIndex; setData(prev=>{ const next = { ...prev }; for(let r=0; r<rows.length; r++){ const d = dateList[baseD + r]; if(!d) break; const row = { ...(next[d]||{}) }; for(let c=0; c<rows[r].length; c++){ const emp = employees[baseI + c]; if(!emp) break; row[emp] = rows[r][c]; } next[d] = row; } return next; }); }}>
-            <table className="min-w-max text-sm w-full">
-              <thead>
-                <tr className="bg-gray-50">
-                  <th className="sticky py-2 px-3 text-left left-sticky" style={{minWidth:'8.5rem'}}>日期</th>
-                  <th className="sticky py-2 px-3 text-left left-sticky-2" style={{minWidth:'6.5rem'}}>星期</th>
-                  <th className="sticky py-2 px-3 text-left left-sticky-3" style={{minWidth:'9rem'}}>问题</th>
-                  {employees.map(e=> {
-                    const diff = (gridEmpCounts[e]?.总||0) - Number(adminDays||0);
-                    const diffCls = diff===0? 'bg-gray-100 text-gray-700' : (diff>0? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700');
-                    return (
-                      <th key={e} className="sticky py-2 px-3 text-left">
-                        <div className="flex items-center gap-2">
-                          <span>{e}</span>
-                          <span className={`badge ${diffCls}`} title="差值=实际总天数-行政班应上天数">{diff>0?`+${diff}`:diff}</span>
-                        </div>
-                      </th>
-                    );
-                  })}
-                </tr>
-              </thead>
-              <tbody>
-                {dateList.map((d,di)=> {
-                  const w = dow(d); const weekend=(w===0||w===6);
-                  const row=data[d]||{}; const issue = nightIssues[d]||'';
-                  const stat = dailyStats[d]||{总:0,白:0,中1:0,中2:0,夜:0};
-                  return (
-                    <tr key={d} className={"border-t hover:bg-indigo-50/30 "+(weekend? 'bg-gray-50' : '')}>
-                      <td className={`py-1.5 px-3 font-medium text-gray-800 left-sticky`} style={{minWidth:'8.5rem'}}>
-                        <div className="flex items-center gap-2"><span>{d}</span></div>
-                        <div className="text-xs text-gray-500 flex flex-wrap items-center gap-1">
-                          <span style={styleForStaffing(stat['总'], staffingAlerts.total)}>在岗 {stat['总']}</span>
-                          <span>（</span>
-                          <span style={styleForStaffing(stat['白'], staffingAlerts.white)}>白 {stat['白']}</span>
-                          <span>/</span>
-                          <span style={styleForStaffing(stat['中1'], staffingAlerts.mid1)}>中1 {stat['中1']}</span>
-                          <span>/</span>
-                          <span>中2 {stat['中2']}</span>
-                          <span>/</span>
-                          <span>夜 {stat['夜']}</span>
-                          <span>）</span>
-                        </div>
-                      </td>
-                      <td className="py-1.5 px-3 text-gray-500 left-sticky-2" style={{minWidth:'6.5rem'}}>周{WN[w]}</td>
-                      <td className="py-1.5 px-3 left-sticky-3" style={{minWidth:'9rem'}}>
-                        {issue? <span className={`badge ${issue==='缺夜&中2'?'bg-red-100 text-red-700':'bg-amber-100 text-amber-700'}`}>{issue}</span> : <span className="text-gray-400">—</span>}
-                      </td>
-                      {employees.map((e,ei)=> {
-                        const v = (data[d]&&data[d][e])||'';
-                        const bg = shiftColors[v] || undefined;
-                        return (
-                          <td key={e} className="py-1.5 px-3">
-                            <div className="cell-wrap">
-                              <input list="shift-options" id={`cell-${di}-${ei}`} className="cell border rounded-lg px-2 py-1.5 focus:ring-2 focus:ring-indigo-300 focus:outline-none transition disabled:bg-gray-100"
-                                style={{ backgroundColor: bg }} value={v}
-                                disabled={editingLocked}
-                                title={editingLocked? '执行中：只读' : ''}
-                                onFocus={()=>onFocusCell(di,ei)} onKeyDown={(ev)=> onKeyDownCell(ev, di, ei)}
-                                onCompositionStart={(ev)=>{ ev.target.isComposing = true; }}
-                                onCompositionEnd={(ev)=>{ ev.target.isComposing = false; setCellByIndex(di, ei, ev.currentTarget.value); }}
-                                onChange={ev=> setCellByIndex(di, ei, ev.target.value)} onDoubleClick={(ev)=>{ if(editingLocked) return; openPickerAt(di, ei, ev.currentTarget); }} placeholder="白/中1/中2/夜/休 或留空" />
-                              <button className="cell-toggle" disabled={editingLocked} aria-label="选择班次" title="选择班次"
-                                onClick={(ev)=>{ ev.preventDefault(); ev.stopPropagation(); openPickerAt(di, ei); }}>
-                                <span className="sr-only">打开班次选择器</span>
-                              </button>
-                            </div>
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            <datalist id="shift-options">
-              {SHIFT_TYPES.map(s=> <option key={s} value={s} />)}
-            </datalist>
-          </div>
-        </>
-      )}
-    </Section>
+    <ScheduleGridSection
+      employees={employees}
+      dateList={dateList}
+      data={data}
+      setData={setData}
+      editingLocked={editingLocked}
+      shiftColors={shiftColors}
+      shiftOptions={SHIFT_TYPES}
+      adminDays={adminDays}
+      gridEmpCounts={gridEmpCounts}
+      staffingAlerts={staffingAlerts}
+      styleForStaffing={styleForStaffing}
+      nightIssues={nightIssues}
+      dailyStats={dailyStats}
+      dow={dow}
+      WN={WN}
+    />
   );
 
   function AlbumEmployeeChecklist(){
@@ -2404,18 +2321,6 @@ function App(){
           </div>
         </div>
       )}
-      {picker.open && (
-        <div className="fixed z-50" style={{ left: picker.x, top: picker.y }}>
-          <div ref={pickerRef} className="picker bg-white border rounded-xl p-1 w-40">
-            {SHIFT_TYPES.map(s=> (
-              <button key={s} className="w-full text-left px-3 py-2 rounded hover:bg-gray-100" onClick={()=>{ setCellByIndex(picker.di, picker.ei, s); setPicker(p=>({...p, open:false})); }}>{s}</button>
-            ))}
-            <div className="h-px bg-gray-100 my-1"></div>
-            <button className="w-full text-left px-3 py-2 rounded hover:bg-gray-100" onClick={()=>{ setCellByIndex(picker.di, picker.ei, ''); setPicker(p=>({...p, open:false})); }}>清空</button>
-          </div>
-        </div>
-      )}
-
       {!user && <LoginModal onSuccess={setUser} accounts={orgConfig.accounts} />}
     </div>
   );

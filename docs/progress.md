@@ -112,8 +112,40 @@
 - `app/public/js/main.js` 通过显式传参与回调方式驱动新组件，页面主文件仅聚焦状态变更、持久化与接口调用。
 - 进度文档同步强调前端 UI 组件逐步迁移到共享模块，便于下阶段继续拆分排班表格与员工管理面板。
 
+## 2025-10-14 第 12 步
+- 在 `app/public/js/ui.js` 新增 `ScheduleGridSection`，封装排班表格、Excel 粘贴与班次选择器交互，组件内部自理焦点与浮层。
+- `app/public/js/main.js` 仅负责传入排班数据、班次配色与统计信息，移除原本的 DOM 操作与事件监听，聚焦业务状态。
+- 继续在文档记录目标结构，下一步将考虑拆分员工管理与统计视图，保持新版目录规范：
+
+```text
+/app
+  /public
+    index.html
+    /assets
+    /js
+      main.js
+      ui.js
+      api.js
+      state.js
+  /api
+    schedule.php
+    progress.php
+    versions.php
+  /core
+    Scheduler.php
+    Rules.php
+    DTO.php
+    Utils.php
+  /storage
+    app.db
+    logs/
+    exports/
+  /config
+    app.php
+```
+
 ### 拆分总体进度速览
 - **后端接口**：`schedule.php`、`versions.php`、`auth.php`、`org_config.php` 已独立；`progress.php` 待按需补充。
 - **核心算法层**：`Scheduler.php`、`Rules.php`、`DTO.php`、`Utils.php` 完成抽离并在 API 层复用。
-- **前端静态资源**：`main.js` 仅负责状态编排；`ui.js` 已承载通用组件、批量排班面板以及历史/设置分区；`api.js`、`state.js` 分别负责请求与规则算法。
+- **前端静态资源**：`main.js` 仅负责状态编排；`ui.js` 已承载通用组件、排班表格、批量排班面板以及历史/设置分区；`api.js`、`state.js` 分别负责请求与规则算法。
 - **配置与存储**：`config/app.php`、`storage/` 结构稳定，等待后续细化日志与导出模块。
