@@ -88,7 +88,9 @@ const {
   useTeamStateMap,
   useProgressLog,
   useProgressTracker,
-  createRestPreferenceStore
+  createRestPreferenceStore,
+  useToast,
+  useSelectionMap
 } = AppState;
 
 function App(){
@@ -118,19 +120,7 @@ function App(){
   const [versions, setVersions]   = useState([]);
   const [versionsLoading, setVersionsLoading] = useState(false);
   const [versionDeletingId, setVersionDeletingId] = useState(null);
-  const [toast, setToast] = useState(null);
-  const toastTimerRef = useRef(null);
-  useEffect(()=>{
-    return ()=>{
-      if(toastTimerRef.current) clearTimeout(toastTimerRef.current);
-    };
-  }, []);
-  const showToast = (message, type = 'info', duration = 2600) => {
-    if(!message) return;
-    if(toastTimerRef.current) clearTimeout(toastTimerRef.current);
-    setToast({ message, type });
-    toastTimerRef.current = setTimeout(()=> setToast(null), duration);
-  };
+  const { toast, showToast } = useToast({ defaultDuration: 2600 });
 
   const { logs, pushLog, logEndRef } = useProgressLog({
     team,
@@ -139,11 +129,21 @@ function App(){
   });
   const { prog, setStage, endStage, failStage } = useProgressTracker({ pushLog });
 
-  const [batchChecked, setBatchChecked] = useState({});
-  const checkedList = useMemo(()=> employees.filter(e=>batchChecked[e]), [employees, batchChecked]);
+  const batchSelection = useSelectionMap({ employees });
+  const batchChecked = batchSelection.selection;
+  const checkedList = batchSelection.selectedList;
+  const setBatchChecked = batchSelection.setSelection;
+  const replaceBatchChecked = batchSelection.replaceSelection;
 
-  const [albumSelected, setAlbumSelected] = useState({});
-  const albumCheckedList = useMemo(()=> employees.filter(e=> albumSelected[e]), [employees, albumSelected]);
+  const albumSelection = useSelectionMap({ employees });
+  const albumSelected = albumSelection.selection;
+  const albumCheckedList = albumSelection.selectedList;
+  const setAlbumSelected = albumSelection.setSelection;
+  const replaceAlbumSelected = albumSelection.replaceSelection;
+  const toggleAlbumSelected = albumSelection.toggle;
+  const selectAlbumMany = albumSelection.selectMany;
+  const invertAlbumMany = albumSelection.invertMany;
+  const clearAlbumSelection = albumSelection.clear;
   const [albumWhiteHour, setAlbumWhiteHour] = useState(0.22);
   const [albumMidHour, setAlbumMidHour] = useState(0.06);
   const [albumRangeStartMonth, setAlbumRangeStartMonth] = useState(defaultStart.slice(0,7));
@@ -204,8 +204,8 @@ function App(){
     setMixMax(typeof merged.mixMax === 'number' ? merged.mixMax : 1);
     setYearlyOptimize(merged.yearlyOptimize === true);
     setNote(typeof merged.note === 'string' ? merged.note : '');
-    setBatchChecked(merged.batchChecked || {});
-    setAlbumSelected(merged.albumSelected || {});
+    replaceBatchChecked(merged.batchChecked || {});
+    replaceAlbumSelected(merged.albumSelected || {});
     setAlbumWhiteHour(typeof merged.albumWhiteHour === 'number' ? merged.albumWhiteHour : 0.22);
     setAlbumMidHour(typeof merged.albumMidHour === 'number' ? merged.albumMidHour : 0.06);
     const startMonth = (merged.albumRangeStartMonth || (merged.start || defaultStart)).slice(0,7);
@@ -562,9 +562,9 @@ function App(){
     const mixMaxPayload = get('mixMax','mix_max');
     if(typeof mixMaxPayload === 'number'){ setMixMax(mixMaxPayload); }
     const batchPayload = get('batchChecked','batch_checked');
-    if(batchPayload && typeof batchPayload === 'object'){ setBatchChecked({ ...batchPayload }); }
+    if(batchPayload && typeof batchPayload === 'object'){ replaceBatchChecked(batchPayload); }
     const albumSelectedPayload = get('albumSelected','album_selected');
-    if(albumSelectedPayload && typeof albumSelectedPayload === 'object'){ setAlbumSelected({ ...albumSelectedPayload }); }
+    if(albumSelectedPayload && typeof albumSelectedPayload === 'object'){ replaceAlbumSelected(albumSelectedPayload); }
     const albumWhitePayload = get('albumWhiteHour','album_white_hour');
     if(typeof albumWhitePayload === 'number'){ setAlbumWhiteHour(albumWhitePayload); }
     const albumMidPayload = get('albumMidHour','album_mid_hour');
@@ -1119,42 +1119,22 @@ function App(){
   };
 
   const handleAlbumToggle = (name) => {
-    if (!name) return;
-    setAlbumSelected((prev) => {
-      const next = prev && typeof prev === 'object' ? { ...prev } : {};
-      next[name] = !next[name];
-      return next;
-    });
+    toggleAlbumSelected(name);
   };
   const handleAlbumSelectAll = (names = []) => {
     if (!Array.isArray(names) || names.length === 0) return;
-    setAlbumSelected((prev) => {
-      const next = prev && typeof prev === 'object' ? { ...prev } : {};
-      names.forEach((n) => {
-        next[n] = true;
-      });
-      return next;
-    });
+    selectAlbumMany(names, true);
   };
   const handleAlbumSelectInverse = (names = []) => {
     if (!Array.isArray(names) || names.length === 0) return;
-    setAlbumSelected((prev) => {
-      const next = prev && typeof prev === 'object' ? { ...prev } : {};
-      names.forEach((n) => {
-        next[n] = !next[n];
-      });
-      return next;
-    });
+    invertAlbumMany(names);
   };
   const handleAlbumSelectClear = (names = []) => {
-    if (!Array.isArray(names) || names.length === 0) return;
-    setAlbumSelected((prev) => {
-      const next = prev && typeof prev === 'object' ? { ...prev } : {};
-      names.forEach((n) => {
-        next[n] = false;
-      });
-      return next;
-    });
+    if (!Array.isArray(names) || names.length === 0) {
+      clearAlbumSelection();
+      return;
+    }
+    selectAlbumMany(names, false);
   };
 
   const ViewAlbum = (

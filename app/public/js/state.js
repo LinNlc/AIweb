@@ -1,5 +1,5 @@
 // 状态模块：承载前端用到的常量、校验与调度算法工具
-const { useState, useEffect, useRef, useCallback } = React;
+const { useState, useEffect, useRef, useCallback, useMemo } = React;
 const WN = ['日', '一', '二', '三', '四', '五', '六'];
 const today = new Date();
 const SHIFT_TYPES = ['白', '中1', '中2', '夜', '休'];
@@ -85,6 +85,17 @@ function sanitizeRestPrefsMap(map) {
   Object.entries(map || {}).forEach(([emp, raw]) => {
     const cleaned = sanitizeRestPairValue(raw);
     if (cleaned) next[emp] = cleaned;
+  });
+  return next;
+}
+
+function normalizeSelectionMap(raw) {
+  if (!raw || typeof raw !== 'object') return {};
+  const next = {};
+  Object.entries(raw).forEach(([key, value]) => {
+    if (value) {
+      next[key] = true;
+    }
   });
   return next;
 }
@@ -886,6 +897,148 @@ function createRestPreferenceStore({ storageKey = REST_PREF_STORAGE_KEY, sanitiz
   };
 }
 
+/**
+ * 全局消息提示 Hook：集中管理提示条内容与自动消失定时器
+ */
+function useToast({ defaultDuration = 2600 } = {}) {
+  const [toast, setToast] = useState(null);
+  const timerRef = useRef(null);
+
+  const hideToast = useCallback(() => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    setToast(null);
+  }, []);
+
+  const showToast = useCallback((message, type = 'info', duration = defaultDuration) => {
+    if (!message) return;
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+    }
+    setToast({ message, type });
+    const delay = Number.isFinite(duration) ? duration : defaultDuration;
+    if (delay > 0) {
+      timerRef.current = setTimeout(() => {
+        hideToast();
+      }, delay);
+    }
+  }, [defaultDuration, hideToast]);
+
+  useEffect(() => () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+    }
+  }, []);
+
+  return { toast, showToast, hideToast };
+}
+
+/**
+ * 人员勾选状态 Hook：将 map 形式的选中状态集中管理并提供批量操作
+ */
+function useSelectionMap({ employees = [], initial = {} } = {}) {
+  const [selection, setSelectionState] = useState(() => normalizeSelectionMap(initial));
+
+  const setSelection = useCallback((updater) => {
+    setSelectionState((prev) => {
+      const source = typeof updater === 'function' ? updater({ ...prev }) : updater;
+      return normalizeSelectionMap(source);
+    });
+  }, []);
+
+  const replaceSelection = useCallback((map) => {
+    setSelectionState(normalizeSelectionMap(map));
+  }, []);
+
+  const toggle = useCallback((name, value) => {
+    if (!name) return;
+    setSelectionState((prev) => {
+      const next = { ...prev };
+      const shouldCheck = typeof value === 'boolean' ? value : !next[name];
+      if (shouldCheck) {
+        next[name] = true;
+      } else {
+        delete next[name];
+      }
+      return next;
+    });
+  }, []);
+
+  const selectMany = useCallback((names = [], value = true) => {
+    if (!Array.isArray(names) || names.length === 0) return;
+    setSelectionState((prev) => {
+      const next = { ...prev };
+      names.forEach((name) => {
+        if (!name) return;
+        if (value) {
+          next[name] = true;
+        } else {
+          delete next[name];
+        }
+      });
+      return next;
+    });
+  }, []);
+
+  const invertMany = useCallback((names = []) => {
+    if (!Array.isArray(names) || names.length === 0) return;
+    setSelectionState((prev) => {
+      const next = { ...prev };
+      names.forEach((name) => {
+        if (!name) return;
+        if (next[name]) {
+          delete next[name];
+        } else {
+          next[name] = true;
+        }
+      });
+      return next;
+    });
+  }, []);
+
+  const clear = useCallback(() => {
+    setSelectionState({});
+  }, []);
+
+  const selectedList = useMemo(() => {
+    if (!Array.isArray(employees) || employees.length === 0) return [];
+    return employees.filter((emp) => !!selection[emp]);
+  }, [employees, selection]);
+
+  useEffect(() => {
+    setSelectionState((prev) => {
+      if (!Array.isArray(employees) || employees.length === 0) {
+        return {};
+      }
+      const next = {};
+      employees.forEach((emp) => {
+        if (prev[emp]) {
+          next[emp] = true;
+        }
+      });
+      const prevKeys = Object.keys(prev);
+      const nextKeys = Object.keys(next);
+      if (prevKeys.length === nextKeys.length && prevKeys.every((key) => next[key])) {
+        return prev;
+      }
+      return next;
+    });
+  }, [employees]);
+
+  return {
+    selection,
+    setSelection,
+    replaceSelection,
+    toggle,
+    selectMany,
+    invertMany,
+    clear,
+    selectedList,
+  };
+}
+
 function useOrgConfigState({ apiGet, apiPost, normalizeOrgConfig, storageKey = ORG_STORAGE_KEY, debounceMs = 400 }) {
   const [orgConfig, setOrgConfig] = useState(() => {
     const stored = readJSONFromStorage(storageKey, null);
@@ -1187,5 +1340,7 @@ window.AppState = {
   useTeamStateMap,
   useProgressLog,
   useProgressTracker,
-  createRestPreferenceStore
+  createRestPreferenceStore,
+  useToast,
+  useSelectionMap
 };

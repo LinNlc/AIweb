@@ -215,14 +215,19 @@
 - 更新 `app/public/js/main.js` 通过新工厂恢复/持久化休息偏好，并在加载服务器数据时同步应用缓存，确保跨团队切换时保留历史偏好。
 - 进度文档补充最新成果与完成度，保持模块拆分轨迹可追溯。
 
+## 2025-10-14 第 27 步
+- 在 `app/public/js/state.js` 补充 `useToast`、`useSelectionMap` Hook，将提示条与人员勾选映射的状态管理集中到状态模块，附中文注释说明复用方式。
+- `app/public/js/main.js` 改用新 Hook 驱动批量排班与专辑审核的选择列表，并复用统一提示条逻辑，入口文件仅关注业务流程与回调。
+- 进度文档同步更新完成度与职责表，确认前端状态层覆盖提示、缓存与选择管理，后续可聚焦剩余优化。
+
 ### 拆分总体进度速览
 - **后端接口**：`schedule.php`、`versions.php`、`auth.php`、`org_config.php`、`progress.php` 均已独立，下一步评估导出/统计专用接口及鉴权强化。
 - **核心算法层**：`Scheduler.php`（自动排班入口占位）、`History.php`（历史统计）、`Rules.php`、`Validation.php`、`DTO.php`、`Utils.php` 已抽离，`Repository.php` 统一管理排班版本数据访问，`OrgConfig.php`、`Storage.php`/`Progress.php` 与 `Exporter.php` 划分了配置、日志与导出职责。
-- **前端静态资源**：`state.js` 负责常量、校验、进度与配置等状态 Hook；`ui.js` 覆盖所有 React 视图；`api.js` 管理请求封装；`main.js` 仅串联业务流程与组件。
+- **前端静态资源**：`state.js` 负责常量、校验、进度、休息偏好缓存、提示条与人员选择 Hook；`ui.js` 覆盖所有 React 视图；`api.js` 管理请求封装；`main.js` 仅串联业务流程与组件。
 - **配置与存储**：`config/app.php`、`storage/` 结构稳定，进度日志已落地至 JSONL，仍需完善导出/备份策略。
-- **完成度**：约 99%，后端与前端主体拆分完成，后续聚焦日志可视化、统计面板与权限策略细化。
+- **完成度**：约 99.5%，后端与前端主体拆分完成，后续聚焦日志可视化、统计面板与权限策略细化。
 
-### 现有程序结构与职责（第 26 步更新）
+### 现有程序结构与职责（第 27 步更新）
 
 | 文件 | 核心作用 | 备注/注释 |
 | --- | --- | --- |
@@ -249,7 +254,7 @@
 | `app/core/ScheduleService.php` | 排班服务模块 | 汇总排班查询与保存流程，处理乐观锁并追加进度日志 |
 | `app/public/index.html` | 前端入口页面 | 负责加载 React、Babel 以及拆分后的脚本资源 |
 | `app/public/js/api.js` | 前端请求层 | 暴露 `apiGet`、`apiPost`、进度日志工具等方法 |
-| `app/public/js/state.js` | 状态与业务工具 | 提供常量、校验、调度流程、休息偏好缓存工厂与进度/配置等 `use*` Hook |
+| `app/public/js/state.js` | 状态与业务工具 | 提供常量、校验、调度流程、休息偏好缓存工厂、提示条/人员选择 Hook 以及进度/配置等 `use*` Hook |
 | `app/public/js/ui.js` | UI 组件库 | 聚合导航、排班表格、员工管理等 React 组件 |
-| `app/public/js/main.js` | 应用入口 | 消费状态 Hook/缓存工厂，负责事件处理与视图组合 |
+| `app/public/js/main.js` | 应用入口 | 消费状态 Hook/缓存工厂，负责事件处理与视图组合，现已复用统一提示与选择状态 |
 | `docs/progress.md` | 拆分记录 | 追踪阶段性成果、目录结构与完成度 |
