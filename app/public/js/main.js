@@ -59,8 +59,6 @@ const {
   normalizeOrgConfig,
   defaultOrgConfig,
   createEmptyTeamState,
-  ORG_STORAGE_KEY,
-  TEAM_STATE_STORAGE_KEY,
   pairToSet,
   dayToW,
   isRestDayForEmp,
@@ -85,98 +83,27 @@ const {
   adjustEmployeeSchedule,
   adjustWithHistory,
   runAutoScheduleFlow,
-  assignNightForWindows
+  assignNightForWindows,
+  useOrgConfigState,
+  useTeamStateMap
 } = AppState;
 
 function App(){
   const [user, setUser] = useState(null);
   useEffect(()=>{ (async()=>{ try{ await apiPost('/logout',{}); } catch{} finally { setUser(null); } })(); },[]);
 
-  const [orgConfig, setOrgConfig] = useState(()=>{
-    try{
-      const raw = JSON.parse(localStorage.getItem(ORG_STORAGE_KEY)||'null');
-      return normalizeOrgConfig(raw||undefined);
-    }catch{
-      return normalizeOrgConfig();
-    }
-  });
-  const updateOrgConfig = (updater)=>{
-    setOrgConfig(prev=>{
-      const base = typeof updater === 'function' ? updater(prev) : updater;
-      return normalizeOrgConfig(base);
-    });
-  };
-  useEffect(()=>{ try{ localStorage.setItem(ORG_STORAGE_KEY, JSON.stringify(orgConfig)); }catch{} }, [orgConfig]);
-  const orgConfigLoadedRef = useRef(false);
-  const lastSyncedOrgConfigRef = useRef('');
-  useEffect(()=>{
-    let cancelled = false;
-    (async()=>{
-      try{
-        const res = await apiGet('/org-config');
-        if(cancelled) return;
-        if(res && res.config && typeof res.config === 'object'){
-          const normalized = normalizeOrgConfig(res.config);
-          lastSyncedOrgConfigRef.current = JSON.stringify(normalized);
-          updateOrgConfig(normalized);
-        }
-      }catch(e){
-        console.warn('加载 org 配置失败', e);
-      } finally {
-        if(!cancelled){
-          orgConfigLoadedRef.current = true;
-        }
-      }
-    })();
-    return ()=>{ cancelled = true; };
-  }, []);
-  useEffect(()=>{
-    if(!orgConfigLoadedRef.current) return;
-    const serialized = JSON.stringify(orgConfig);
-    if(serialized === lastSyncedOrgConfigRef.current) return;
-    const timer = setTimeout(()=>{
-      (async()=>{
-        try{
-          await apiPost('/org-config', { config: orgConfig });
-          lastSyncedOrgConfigRef.current = serialized;
-        }catch(e){
-          console.warn('保存 org 配置失败', e);
-        }
-      })();
-    }, 400);
-    return ()=> clearTimeout(timer);
-  }, [orgConfig]);
-
   const [defaultStart, defaultEnd] = useMemo(()=> monthRangeOf(today), []);
-  const [teamStateMap, setTeamStateMap] = useState(()=>{
-    try{
-      const raw = JSON.parse(localStorage.getItem(TEAM_STATE_STORAGE_KEY)||'{}');
-      if(raw && typeof raw === 'object') return raw;
-    }catch{}
-    return {};
+  const { orgConfig, updateOrgConfig } = useOrgConfigState({
+    apiGet,
+    apiPost,
+    normalizeOrgConfig,
   });
-  useEffect(()=>{ try{ localStorage.setItem(TEAM_STATE_STORAGE_KEY, JSON.stringify(teamStateMap)); }catch{} }, [teamStateMap]);
-  useEffect(()=>{
-    setTeamStateMap(prev=>{
-      let changed = false;
-      const next = { ...prev };
-      const valid = new Set();
-      orgConfig.teams.forEach(team=>{
-        valid.add(team.id);
-        if(!next[team.id]){
-          next[team.id] = createEmptyTeamState(defaultStart, defaultEnd);
-          changed = true;
-        }
-      });
-      Object.keys(next).forEach(id=>{
-        if(!valid.has(id)){
-          delete next[id];
-          changed = true;
-        }
-      });
-      return changed ? next : prev;
-    });
-  }, [orgConfig.teams, defaultStart, defaultEnd]);
+  const [teamStateMap, setTeamStateMap] = useTeamStateMap({
+    orgConfig,
+    defaultStart,
+    defaultEnd,
+    createEmptyTeamState,
+  });
 
   const [team, setTeam] = useState(()=> (orgConfig.teams?.[0]?.id || 'default'));
   const [note, setNote] = useState('');

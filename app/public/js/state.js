@@ -1,4 +1,5 @@
 // 状态模块：承载前端用到的常量、校验与调度算法工具
+const { useState, useEffect, useRef, useCallback } = React;
 const WN = ['日', '一', '二', '三', '四', '五', '六'];
 const today = new Date();
 const SHIFT_TYPES = ['白', '中1', '中2', '夜', '休'];
@@ -793,6 +794,173 @@ function assignNightForWindows({ employees, data, nightWindows = [], nightOverri
   return nextData;
 }
 
+function readJSONFromStorage(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    return JSON.parse(raw);
+  } catch (err) {
+    console.warn('读取本地存储失败', key, err);
+    return fallback;
+  }
+}
+
+function writeJSONToStorage(key, value) {
+  try {
+    if (value === undefined) {
+      localStorage.removeItem(key);
+    } else {
+      localStorage.setItem(key, JSON.stringify(value));
+    }
+  } catch (err) {
+    console.warn('写入本地存储失败', key, err);
+  }
+}
+
+function useOrgConfigState({ apiGet, apiPost, normalizeOrgConfig, storageKey = ORG_STORAGE_KEY, debounceMs = 400 }) {
+  const [orgConfig, setOrgConfig] = useState(() => {
+    const stored = readJSONFromStorage(storageKey, null);
+    return normalizeOrgConfig(stored || undefined);
+  });
+  const [loaded, setLoaded] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const lastSyncedRef = useRef(JSON.stringify(orgConfig));
+  const debounceRef = useRef(null);
+
+  const updateOrgConfig = useCallback((updater) => {
+    setOrgConfig((prev) => {
+      const base = typeof updater === 'function' ? updater(prev) : updater;
+      return normalizeOrgConfig(base);
+    });
+  }, [normalizeOrgConfig]);
+
+  useEffect(() => {
+    writeJSONToStorage(storageKey, orgConfig);
+  }, [orgConfig, storageKey]);
+
+  const refreshOrgConfig = useCallback(async () => {
+    try {
+      const res = await apiGet('/org-config');
+      if (res && res.config && typeof res.config === 'object') {
+        const normalized = normalizeOrgConfig(res.config);
+        lastSyncedRef.current = JSON.stringify(normalized);
+        setOrgConfig(normalized);
+      }
+    } catch (err) {
+      console.warn('加载 org 配置失败', err);
+      throw err;
+    }
+  }, [apiGet, normalizeOrgConfig]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        await refreshOrgConfig();
+      } catch {
+        /* 已在 refreshOrgConfig 中记录 */
+      }
+      if (!cancelled) {
+        setLoaded(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshOrgConfig]);
+
+  useEffect(() => {
+    if (!loaded) {
+      return undefined;
+    }
+    const serialized = JSON.stringify(orgConfig);
+    if (serialized === lastSyncedRef.current) {
+      return undefined;
+    }
+    let cancelled = false;
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+    }
+    debounceRef.current = setTimeout(() => {
+      if (cancelled) {
+        return;
+      }
+      setSyncing(true);
+      (async () => {
+        try {
+          await apiPost('/org-config', { config: orgConfig });
+          if (!cancelled) {
+            lastSyncedRef.current = serialized;
+          }
+        } catch (err) {
+          if (!cancelled) {
+            console.warn('保存 org 配置失败', err);
+          }
+        } finally {
+          if (!cancelled) {
+            setSyncing(false);
+          }
+        }
+      })();
+    }, debounceMs);
+    return () => {
+      cancelled = true;
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+      }
+      setSyncing(false);
+    };
+  }, [orgConfig, loaded, apiPost, debounceMs]);
+
+  return {
+    orgConfig,
+    updateOrgConfig,
+    loaded,
+    syncing,
+    refreshOrgConfig,
+  };
+}
+
+function useTeamStateMap({ orgConfig, defaultStart, defaultEnd, createEmptyTeamState, storageKey = TEAM_STATE_STORAGE_KEY }) {
+  const [teamStateMap, setTeamStateMap] = useState(() => {
+    const stored = readJSONFromStorage(storageKey, {});
+    return stored && typeof stored === 'object' ? stored : {};
+  });
+
+  useEffect(() => {
+    writeJSONToStorage(storageKey, teamStateMap);
+  }, [teamStateMap, storageKey]);
+
+  useEffect(() => {
+    setTeamStateMap((prev) => {
+      const teams = Array.isArray(orgConfig?.teams) ? orgConfig.teams : [];
+      const next = { ...prev };
+      const valid = new Set();
+      let changed = false;
+      teams.forEach((team) => {
+        if (!team || !team.id) {
+          return;
+        }
+        const id = team.id;
+        valid.add(id);
+        if (!next[id]) {
+          next[id] = createEmptyTeamState(defaultStart, defaultEnd);
+          changed = true;
+        }
+      });
+      Object.keys(next).forEach((id) => {
+        if (!valid.has(id)) {
+          delete next[id];
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [orgConfig, defaultStart, defaultEnd, createEmptyTeamState]);
+
+  return [teamStateMap, setTeamStateMap];
+}
+
 window.AppState = {
   WN,
   today,
@@ -861,5 +1029,7 @@ window.AppState = {
   adjustWithHistory,
   autoAssignNightAndM2,
   runAutoScheduleFlow,
-  assignNightForWindows
+  assignNightForWindows,
+  useOrgConfigState,
+  useTeamStateMap
 };
