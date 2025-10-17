@@ -961,6 +961,90 @@ function useTeamStateMap({ orgConfig, defaultStart, defaultEnd, createEmptyTeamS
   return [teamStateMap, setTeamStateMap];
 }
 
+function useProgressLog({ team, fetchProgressLogs, appendProgressLog }) {
+  const [logs, setLogs] = useState([]);
+  const logEndRef = useRef(null);
+
+  const syncProgressLog = useCallback((message, extra = {}) => {
+    if (!message || typeof appendProgressLog !== 'function') return;
+    const payload = { team, message, ...extra };
+    if (typeof payload.progress === 'number') {
+      if (!Number.isFinite(payload.progress)) {
+        delete payload.progress;
+      } else {
+        payload.progress = Math.max(0, Math.min(100, Math.round(payload.progress)));
+      }
+    }
+    if (payload.context && typeof payload.context !== 'object') {
+      delete payload.context;
+    }
+    appendProgressLog(payload).catch(() => {});
+  }, [team, appendProgressLog]);
+
+  const pushLog = useCallback((msg, meta = {}) => {
+    if (!msg) return;
+    const label = `[${new Date().toLocaleTimeString()}] ${msg}`;
+    setLogs((prev) => [...prev.slice(-199), label]);
+    if (meta.skipPersist) return;
+    if (typeof msg === 'string' && msg.startsWith('心跳')) return;
+    syncProgressLog(msg, meta);
+  }, [syncProgressLog]);
+
+  useEffect(() => {
+    if (typeof fetchProgressLogs !== 'function') return undefined;
+    let cancelled = false;
+    fetchProgressLogs({ team, limit: 50 }).then((res) => {
+      if (cancelled || !res || !Array.isArray(res.items)) return;
+      const next = res.items.map((item) => {
+        const time = item.timestamp ? new Date(item.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
+        const label = item.stage && item.stage !== item.message ? `${item.stage}：${item.message || ''}` : (item.message || '');
+        return `[${time}] ${label}`;
+      });
+      setLogs(next.slice(-200));
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [team, fetchProgressLogs]);
+
+  useEffect(() => {
+    if (logEndRef.current) {
+      logEndRef.current.scrollIntoView({ behavior: 'auto' });
+    }
+  }, [logs]);
+
+  return { logs, pushLog, logEndRef };
+}
+
+function useProgressTracker({ pushLog }) {
+  const [prog, setProg] = useState({ running: false, stage: '', done: 0, total: 100 });
+
+  const setStage = useCallback((stage, done, total) => {
+    const progress = total ? Math.round((done / total) * 100) : done;
+    setProg({ running: true, stage, done, total });
+    pushLog(stage, { stage, progress });
+  }, [pushLog]);
+
+  const endStage = useCallback(() => {
+    setProg({ running: false, stage: '完成', done: 100, total: 100 });
+    pushLog('执行完成', { stage: '完成', progress: 100 });
+  }, [pushLog]);
+
+  const failStage = useCallback((message, extra = {}) => {
+    setProg({ running: false, stage: '失败', done: 0, total: 100 });
+    const text = message ? String(message) : '执行失败';
+    pushLog(text, { ...extra, stage: '失败' });
+  }, [pushLog]);
+
+  useEffect(() => {
+    if (!prog.running) return undefined;
+    const timer = setInterval(() => {
+      pushLog('心跳：计算中…', { skipPersist: true });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [prog.running, pushLog]);
+
+  return { prog, setStage, endStage, failStage };
+}
+
 window.AppState = {
   WN,
   today,
@@ -1031,5 +1115,7 @@ window.AppState = {
   runAutoScheduleFlow,
   assignNightForWindows,
   useOrgConfigState,
-  useTeamStateMap
+  useTeamStateMap,
+  useProgressLog,
+  useProgressTracker
 };

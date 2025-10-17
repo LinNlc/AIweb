@@ -200,14 +200,19 @@
 - `app/core/ScheduleService.php` 与 `app/api/versions.php` 改为依赖新历史模块，`Scheduler.php` 专注保留自动排班入口占位。
 - 更新本进度文档的完成度至 96%，同步结构概览与文件职责表，明确历史统计模块的职责边界。
 
+## 2025-10-14 第 24 步
+- 在 `app/public/js/state.js` 新增 `useProgressLog`、`useProgressTracker`，统一管理进度日志加载、追加与运行状态心跳逻辑。
+- `app/public/js/main.js` 改为消费新 Hook，入口文件聚焦业务编排，进度/日志渲染交由状态模块集中处理。
+- 文档更新完成度至 97%，同步整体结构说明与文件职责描述，确保前端状态层的职责边界更加清晰。
+
 ### 拆分总体进度速览
 - **后端接口**：`schedule.php`、`versions.php`、`auth.php`、`org_config.php`、`progress.php` 均已独立，下一步评估导出/统计专用接口及鉴权强化。
 - **核心算法层**：`Scheduler.php`（自动排班入口占位）、`History.php`（历史统计）、`Rules.php`、`DTO.php`、`Utils.php` 已抽离，`Repository.php` 统一管理排班版本数据访问，`OrgConfig.php`、`Storage.php`/`Progress.php` 与 `Exporter.php` 划分了配置、日志与导出职责。
-- **前端静态资源**：`state.js` 现负责常量、校验与状态 Hook；`ui.js` 覆盖所有 React 视图；`api.js` 管理请求封装；`main.js` 专注于业务流程与组件拼装。
+- **前端静态资源**：`state.js` 负责常量、校验、进度与配置等状态 Hook；`ui.js` 覆盖所有 React 视图；`api.js` 管理请求封装；`main.js` 仅串联业务流程与组件。
 - **配置与存储**：`config/app.php`、`storage/` 结构稳定，进度日志已落地至 JSONL，仍需完善导出/备份策略。
-- **完成度**：约 96%，后端与前端主体拆分完成，后续聚焦日志可视化、统计面板与权限策略细化。
+- **完成度**：约 97%，后端与前端主体拆分完成，后续聚焦日志可视化、统计面板与权限策略细化。
 
-### 现有程序结构与职责（第 23 步更新）
+### 现有程序结构与职责（第 24 步更新）
 
 | 文件 | 核心作用 | 备注/注释 |
 | --- | --- | --- |
@@ -233,7 +238,7 @@
 | `app/core/ScheduleService.php` | 排班服务模块 | 汇总排班查询与保存流程，处理乐观锁并追加进度日志 |
 | `app/public/index.html` | 前端入口页面 | 负责加载 React、Babel 以及拆分后的脚本资源 |
 | `app/public/js/api.js` | 前端请求层 | 暴露 `apiGet`、`apiPost`、进度日志工具等方法 |
-| `app/public/js/state.js` | 状态与业务工具 | 提供常量、校验函数、调度流程与 `use*` Hook |
+| `app/public/js/state.js` | 状态与业务工具 | 提供常量、校验、调度流程与进度/配置等 `use*` Hook |
 | `app/public/js/ui.js` | UI 组件库 | 聚合导航、排班表格、员工管理等 React 组件 |
-| `app/public/js/main.js` | 应用入口 | 负责状态初始化、事件处理与视图组合 |
+| `app/public/js/main.js` | 应用入口 | 消费状态 Hook，负责事件处理与视图组合 |
 | `docs/progress.md` | 拆分记录 | 追踪阶段性成果、目录结构与完成度 |

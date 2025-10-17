@@ -85,7 +85,9 @@ const {
   runAutoScheduleFlow,
   assignNightForWindows,
   useOrgConfigState,
-  useTeamStateMap
+  useTeamStateMap,
+  useProgressLog,
+  useProgressTracker
 } = AppState;
 
 function App(){
@@ -129,54 +131,12 @@ function App(){
     toastTimerRef.current = setTimeout(()=> setToast(null), duration);
   };
 
-  const [prog, setProg] = useState({ running:false, stage:'', done:0, total:100 });
-  const [logs, setLogs] = useState([]);
-  const logEndRef = useRef(null);
-  const syncProgressLog = (message, extra = {}) => {
-    if(!message || typeof appendProgressLog !== 'function') return;
-    const payload = { team, message, ...extra };
-    if(typeof payload.progress === 'number'){
-      if(!Number.isFinite(payload.progress)){
-        delete payload.progress;
-      }else{
-        payload.progress = Math.max(0, Math.min(100, Math.round(payload.progress)));
-      }
-    }
-    if(payload.context && typeof payload.context !== 'object') {
-      delete payload.context;
-    }
-    appendProgressLog(payload).catch(()=>{});
-  };
-  const pushLog = (msg, meta = {}) => {
-    if(!msg) return;
-    setLogs(prev=> [...prev.slice(-199), `[${new Date().toLocaleTimeString()}] ${msg}`]);
-    if(meta.skipPersist) return;
-    if(typeof msg === 'string' && msg.startsWith('心跳')) return;
-    syncProgressLog(msg, meta);
-  };
-  useEffect(()=>{
-    if(typeof fetchProgressLogs === 'function'){
-      let cancelled = false;
-      fetchProgressLogs({ team, limit: 50 }).then(res=>{
-        if(cancelled || !res || !Array.isArray(res.items)) return;
-        const next = res.items.map(item=>{
-          const time = item.timestamp ? new Date(item.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
-          const label = item.stage && item.stage !== item.message ? `${item.stage}：${item.message || ''}` : (item.message || '');
-          return `[${time}] ${label}`;
-        });
-        setLogs(next.slice(-200));
-      }).catch(()=>{});
-      return ()=>{ cancelled = true; };
-    }
-  }, [team]);
-  useEffect(()=>{ if(prog.running){ const t = setInterval(()=>{ pushLog('心跳：计算中…', { skipPersist:true }); }, 1000); return ()=> clearInterval(t); } }, [prog.running]);
-  useEffect(()=>{ logEndRef.current && logEndRef.current.scrollIntoView({behavior:'auto'}); }, [logs]);
-  const setStage = (stage, done, total)=> {
-    const progress = total ? Math.round((done / total) * 100) : done;
-    setProg({ running:true, stage, done, total });
-    pushLog(stage, { stage, progress });
-  };
-  const endStage = ()=> { setProg({ running:false, stage:'完成', done:100, total:100 }); pushLog('执行完成', { stage:'完成', progress:100 }); };
+  const { logs, pushLog, logEndRef } = useProgressLog({
+    team,
+    fetchProgressLogs,
+    appendProgressLog
+  });
+  const { prog, setStage, endStage, failStage } = useProgressTracker({ pushLog });
 
   const [batchChecked, setBatchChecked] = useState({});
   const checkedList = useMemo(()=> employees.filter(e=>batchChecked[e]), [employees, batchChecked]);
@@ -854,8 +814,8 @@ function App(){
       endStage();
     } catch (error) {
       console.error('自动排班失败', error);
-      pushLog(`错误：${error?.message || error}`, { stage:'失败' });
-      setProg({ running: false, stage: '失败', done: 0, total: 100 });
+      const errMsg = `错误：${error?.message || error}`;
+      failStage(errMsg);
       alert(error?.message ? `自动排班失败：${error.message}` : '自动排班失败');
     }
   };
