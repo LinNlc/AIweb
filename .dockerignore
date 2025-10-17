@@ -1,0 +1,11 @@
+.git
+.github
+Dockerfile
+README.md
+LICENSE
+*.md
+app/storage/*.db
+app/storage/*.sqlite
+app/storage/logs/*
+app/storage/exports/*
+docs/
