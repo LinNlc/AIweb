@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/Rules.php';
 require_once __DIR__ . '/DTO.php';
-require_once __DIR__ . '/Scheduler.php';
+require_once __DIR__ . '/History.php';
 require_once __DIR__ . '/Repository.php';
 require_once __DIR__ . '/Progress.php';
 

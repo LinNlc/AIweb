@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-require_once __DIR__ . '/../core/Scheduler.php';
+require_once __DIR__ . '/../core/History.php';
 require_once __DIR__ . '/../core/DTO.php';
 require_once __DIR__ . '/../core/Repository.php';
 require_once __DIR__ . '/../core/Exporter.php';

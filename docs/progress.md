@@ -195,14 +195,19 @@
 - `app/api/schedule.php` 精简为参数提取 + 服务调用，冲突、校验等异常交由服务层抛出，接口仅负责 JSON 响应。
 - 在本文档更新完成度至 95%，同时扩充文件职责表纳入新服务模块，便于后续聚焦统计/权限拆分。
 
+## 2025-10-14 第 23 步
+- 新增 `app/core/History.php`，将历史统计逻辑独立成模块，解耦排班算法与统计维度并补充中文注释。
+- `app/core/ScheduleService.php` 与 `app/api/versions.php` 改为依赖新历史模块，`Scheduler.php` 专注保留自动排班入口占位。
+- 更新本进度文档的完成度至 96%，同步结构概览与文件职责表，明确历史统计模块的职责边界。
+
 ### 拆分总体进度速览
 - **后端接口**：`schedule.php`、`versions.php`、`auth.php`、`org_config.php`、`progress.php` 均已独立，下一步评估导出/统计专用接口及鉴权强化。
-- **核心算法层**：`Scheduler.php`、`Rules.php`、`DTO.php`、`Utils.php` 已抽离，`Repository.php` 统一管理排班版本数据访问，新增的 `OrgConfig.php`、`Storage.php`/`Progress.php` 与 `Exporter.php` 划分了配置、日志与导出职责。
+- **核心算法层**：`Scheduler.php`（自动排班入口占位）、`History.php`（历史统计）、`Rules.php`、`DTO.php`、`Utils.php` 已抽离，`Repository.php` 统一管理排班版本数据访问，`OrgConfig.php`、`Storage.php`/`Progress.php` 与 `Exporter.php` 划分了配置、日志与导出职责。
 - **前端静态资源**：`state.js` 现负责常量、校验与状态 Hook；`ui.js` 覆盖所有 React 视图；`api.js` 管理请求封装；`main.js` 专注于业务流程与组件拼装。
 - **配置与存储**：`config/app.php`、`storage/` 结构稳定，进度日志已落地至 JSONL，仍需完善导出/备份策略。
-- **完成度**：约 95%，后端与前端主体拆分完成，后续聚焦日志可视化、统计面板与权限策略细化。
+- **完成度**：约 96%，后端与前端主体拆分完成，后续聚焦日志可视化、统计面板与权限策略细化。
 
-### 现有程序结构与职责（第 22 步更新）
+### 现有程序结构与职责（第 23 步更新）
 
 | 文件 | 核心作用 | 备注/注释 |
 | --- | --- | --- |
@@ -221,7 +226,8 @@
 | `app/core/Progress.php` | 进度日志工具 | 负责进度 JSONL 的读取与写入 |
 | `app/core/Rules.php` | 业务规则模块 | 统一团队、成员、日期等数据校验与清洗 |
 | `app/core/DTO.php` | 数据装配模块 | 将数据库结果转换为排班 DTO/快照 |
-| `app/core/Scheduler.php` | 排班算法辅助 | 提供历史统计、自动排班相关的算法函数 |
+| `app/core/Scheduler.php` | 排班算法入口 | 保留自动排班占位实现，后续扩展核心算法 |
+| `app/core/History.php` | 历史统计模块 | 负责排班历史数据的统计与概览生成 |
 | `app/core/Repository.php` | 数据访问仓储 | 封装排班版本的查询、插入、删除与列表逻辑 |
 | `app/core/Exporter.php` | 导出工具模块 | 构建表格矩阵并输出 XLSX/CSV 附件 |
 | `app/core/ScheduleService.php` | 排班服务模块 | 汇总排班查询与保存流程，处理乐观锁并追加进度日志 |
