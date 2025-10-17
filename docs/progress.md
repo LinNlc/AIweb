@@ -205,14 +205,19 @@
 - `app/public/js/main.js` 改为消费新 Hook，入口文件聚焦业务编排，进度/日志渲染交由状态模块集中处理。
 - 文档更新完成度至 97%，同步整体结构说明与文件职责描述，确保前端状态层的职责边界更加清晰。
 
+## 2025-10-14 第 25 步
+- 将团队、日期、成员列表与排班矩阵的归一化逻辑迁移至新建的 `app/core/Validation.php`，让各模块可以单独复用校验工具。
+- `app/core/Rules.php` 聚焦组合型规则与保存流程校验，避免重复维护底层清洗函数。
+- `app/api/progress.php` 改为直接依赖 `Validation.php` 以获取团队归一化能力，整体职责链路更加清晰。
+
 ### 拆分总体进度速览
 - **后端接口**：`schedule.php`、`versions.php`、`auth.php`、`org_config.php`、`progress.php` 均已独立，下一步评估导出/统计专用接口及鉴权强化。
-- **核心算法层**：`Scheduler.php`（自动排班入口占位）、`History.php`（历史统计）、`Rules.php`、`DTO.php`、`Utils.php` 已抽离，`Repository.php` 统一管理排班版本数据访问，`OrgConfig.php`、`Storage.php`/`Progress.php` 与 `Exporter.php` 划分了配置、日志与导出职责。
+- **核心算法层**：`Scheduler.php`（自动排班入口占位）、`History.php`（历史统计）、`Rules.php`、`Validation.php`、`DTO.php`、`Utils.php` 已抽离，`Repository.php` 统一管理排班版本数据访问，`OrgConfig.php`、`Storage.php`/`Progress.php` 与 `Exporter.php` 划分了配置、日志与导出职责。
 - **前端静态资源**：`state.js` 负责常量、校验、进度与配置等状态 Hook；`ui.js` 覆盖所有 React 视图；`api.js` 管理请求封装；`main.js` 仅串联业务流程与组件。
 - **配置与存储**：`config/app.php`、`storage/` 结构稳定，进度日志已落地至 JSONL，仍需完善导出/备份策略。
-- **完成度**：约 97%，后端与前端主体拆分完成，后续聚焦日志可视化、统计面板与权限策略细化。
+- **完成度**：约 98%，后端与前端主体拆分完成，后续聚焦日志可视化、统计面板与权限策略细化。
 
-### 现有程序结构与职责（第 24 步更新）
+### 现有程序结构与职责（第 25 步更新）
 
 | 文件 | 核心作用 | 备注/注释 |
 | --- | --- | --- |
@@ -229,7 +234,8 @@
 | `app/core/Http.php` | HTTP 工具模块 | 解析 JSON 请求体，统一 JSON 成功/错误响应 |
 | `app/core/Storage.php` | 存储目录辅助 | 解析数据库同级目录并自动创建 logs/exports 等路径 |
 | `app/core/Progress.php` | 进度日志工具 | 负责进度 JSONL 的读取与写入 |
-| `app/core/Rules.php` | 业务规则模块 | 统一团队、成员、日期等数据校验与清洗 |
+| `app/core/Rules.php` | 业务规则模块 | 组合排班保存时的整体验证流程 |
+| `app/core/Validation.php` | 数据归一化工具 | 提供团队、日期、成员列表与排班矩阵的基础清洗函数 |
 | `app/core/DTO.php` | 数据装配模块 | 将数据库结果转换为排班 DTO/快照 |
 | `app/core/Scheduler.php` | 排班算法入口 | 保留自动排班占位实现，后续扩展核心算法 |
 | `app/core/History.php` | 历史统计模块 | 负责排班历史数据的统计与概览生成 |

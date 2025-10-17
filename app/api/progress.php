@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-require_once __DIR__ . '/../core/Rules.php';
+require_once __DIR__ . '/../core/Validation.php';
 require_once __DIR__ . '/../core/Utils.php';
 require_once __DIR__ . '/../core/Progress.php';
 
