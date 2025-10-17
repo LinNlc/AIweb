@@ -657,6 +657,142 @@ function autoAssignNightAndM2({ employees, data, start, end, override = false, n
   return next;
 }
 
+/**
+ * 运行自动排班流水线，将原本散落在入口文件中的阶段性算法集中管理。
+ *
+ * @param {Object} options 运行参数
+ * @param {string[]} options.employees 目标员工列表
+ * @param {Object} options.data 当前排班数据
+ * @param {string} options.start 排班开始日期
+ * @param {string} options.end 排班结束日期
+ * @param {Object} options.restPrefs 员工休息偏好
+ * @param {number} options.mixMax 交替调整上限
+ * @param {number} options.rMin 按天最小占比
+ * @param {number} options.rMax 按天最大占比
+ * @param {number} options.pMin 个人最小占比
+ * @param {number} options.pMax 个人最大占比
+ * @param {number} options.adminDays 行政天数（白班保底）
+ * @param {Object|null} options.historyProfile 历史统计画像
+ * @param {boolean} options.yearlyOptimize 是否启用年度均衡
+ * @param {(stage: string, done: number, total: number) => void} options.onStage 阶段回调
+ * @param {(msg: string) => void} [options.onLog] 日志回调
+ * @param {(next: Object) => void} [options.onData] 数据更新回调
+ * @param {number} [options.waitMs=20] 阶段之间的等待毫秒数
+ *
+ * @returns {Promise<Object>} 生成后的最新排班数据
+ */
+async function runAutoScheduleFlow({
+  employees,
+  data,
+  start,
+  end,
+  restPrefs,
+  mixMax,
+  rMin,
+  rMax,
+  pMin,
+  pMax,
+  adminDays,
+  historyProfile,
+  yearlyOptimize,
+  onStage,
+  onLog,
+  onData,
+  waitMs = 20
+}) {
+  const waitForFrame = () => new Promise((resolve) => setTimeout(resolve, waitMs));
+  const targets = sortedByHistory(Array.isArray(employees) ? employees : [], historyProfile);
+
+  if (!targets.length) {
+    return data;
+  }
+
+  const stage = (label, done) => {
+    if (typeof onStage === 'function') {
+      onStage(label, done, 100);
+    }
+  };
+  const emit = (nextData) => {
+    if (typeof onData === 'function') {
+      onData(nextData);
+    }
+  };
+  const log = (message) => {
+    if (typeof onLog === 'function' && message) {
+      onLog(message);
+    }
+  };
+
+  stage('阶段 1/6：拉齐白班（5白+2休）', 10);
+  let cur = buildWhiteFiveTwo({ employees: targets, data, start, end, restPrefs });
+  emit(cur);
+  await waitForFrame();
+
+  stage('阶段 2/6：按周期交替错开放中班', 30);
+  cur = applyAlternateByCycle({ employees: targets, data: cur, start, end }, mixMax);
+  emit(cur);
+  await waitForFrame();
+
+  stage('阶段 3/6：按天比例收敛', 55);
+  cur = clampDailyByRange({ employees: targets, data: cur, start, end, rMin, rMax, maxRounds: 300, mixMaxRatio: mixMax });
+  emit(cur);
+  await waitForFrame();
+
+  stage('阶段 4/6：个人比例收敛', 78);
+  for (let sweep = 0; sweep < 8; sweep++) {
+    cur = clampDailyByRange({ employees: targets, data: cur, start, end, rMin, rMax, maxRounds: 220, mixMaxRatio: mixMax });
+    cur = clampPersonByRange({ employees: targets, data: cur, start, end, pMin, pMax, maxRounds: 260, mixMaxRatio: mixMax });
+    log(`循环微调：第 ${sweep + 1} 轮`);
+  }
+  emit(cur);
+  await waitForFrame();
+
+  stage('阶段 5/6：参考历史与行政天数调整', 92);
+  cur = adjustWithHistory({
+    data: cur,
+    employees: targets,
+    start,
+    end,
+    adminDays,
+    historyProfile,
+    mixMaxRatio: mixMax,
+    yearlyOptimize
+  });
+  emit(cur);
+  await waitForFrame();
+
+  stage('阶段 6/6：校验并微调', 98);
+  cur = repairNoMidToWhite({ data: cur, employees: targets, start, end });
+  emit(cur);
+
+  return cur;
+}
+
+/**
+ * 按夜班窗口批量执行夜班/中二分配，入口层只需负责收集参数。
+ */
+function assignNightForWindows({ employees, data, nightWindows = [], nightOverride, nightRules, restPrefs }) {
+  if (!Array.isArray(nightWindows) || nightWindows.length === 0) {
+    return data;
+  }
+  let nextData = data;
+  nightWindows.forEach((win) => {
+    if (!win || !win.s || !win.e) {
+      return;
+    }
+    nextData = autoAssignNightAndM2({
+      employees,
+      data: nextData,
+      start: win.s,
+      end: win.e,
+      override: nightOverride,
+      nightRules,
+      restPrefs
+    });
+  });
+  return nextData;
+}
+
 window.AppState = {
   WN,
   today,
@@ -723,5 +859,7 @@ window.AppState = {
   sortedByHistory,
   adjustEmployeeSchedule,
   adjustWithHistory,
-  autoAssignNightAndM2
+  autoAssignNightAndM2,
+  runAutoScheduleFlow,
+  assignNightForWindows
 };
