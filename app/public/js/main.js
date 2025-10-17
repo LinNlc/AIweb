@@ -1,0 +1,2107 @@
+const { useState, useMemo, useEffect, useRef } = React;
+
+function globalErr(msg){ const bar = document.getElementById('errbar'); if(bar){ bar.textContent = '错误：' + msg; bar.className = 'show bg-red-50 text-red-700 text-sm px-4 py-2'; } }
+window.addEventListener('error', (e)=> globalErr(e?.message || '脚本错误'));
+window.addEventListener('unhandledrejection', (e)=> globalErr(e?.reason?.message || String(e?.reason || 'Promise 错误')));
+
+const {
+  Icon,
+  Spinner,
+  PillBtn,
+  Section,
+  SideDock,
+  TeamSwitcher,
+  LoginModal,
+  MonthInput,
+  BatchAssignSection,
+  ScheduleGridSection,
+  HistorySection,
+  SettingsSection,
+  AlbumSection,
+  EmployeesSection,
+} = window.AppUI || {};
+const { API_BASE = '/api', apiGet, apiPost, fetchProgressLogs, appendProgressLog } = window.AppAPI || {};
+const AppState = window.AppState || {};
+const {
+  WN,
+  today,
+  SHIFT_TYPES,
+  SHIFT_WORK_TYPES,
+  fmt,
+  monthRangeOf,
+  enumerateDates,
+  dow,
+  dateAdd,
+  monthListBetween,
+  monthKeyToSpan,
+  weekStartKey,
+  isWork,
+  getVal,
+  setVal,
+  countByEmpInRange,
+  countRunLeft,
+  countRunRight,
+  wouldExceed6,
+  REST_PAIRS,
+  MENU_KEYS,
+  defaultShiftColors,
+  defaultStaffingAlerts,
+  normalizeRestPair,
+  sanitizeRestPairValue,
+  sanitizeRestPrefsMap,
+  normalizeStaffingAlerts,
+  contrastColor,
+  styleForStaffing,
+  normalizeNightRules,
+  hashPassword,
+  defaultMenuPerms,
+  normalizeMenuPerms,
+  normalizeOrgConfig,
+  defaultOrgConfig,
+  createEmptyTeamState,
+  pairToSet,
+  dayToW,
+  isRestDayForEmp,
+  buildWhiteFiveTwo,
+  buildWorkBlocks,
+  cyclesForEmp,
+  isRightEdgeWhite,
+  isLeftEdgeMid,
+  dailyMidCount,
+  dailyWhiteCount,
+  empMidCountInRange,
+  empWhiteCountInRange,
+  mixedCyclesCount,
+  longestRun,
+  trySetVal,
+  repairNoMidToWhite,
+  applyAlternateByCycle,
+  clampDailyByRange,
+  clampPersonByRange,
+  statsForEmployee,
+  sortedByHistory,
+  adjustEmployeeSchedule,
+  adjustWithHistory,
+  runAutoScheduleFlow,
+  assignNightForWindows,
+  useOrgConfigState,
+  useTeamStateMap,
+  useProgressLog,
+  useProgressTracker,
+  createRestPreferenceStore,
+  useToast,
+  useSelectionMap
+} = AppState;
+
+function App(){
+  const [user, setUser] = useState(null);
+  useEffect(()=>{ (async()=>{ try{ await apiPost('/logout',{}); } catch{} finally { setUser(null); } })(); },[]);
+
+  const [defaultStart, defaultEnd] = useMemo(()=> monthRangeOf(today), []);
+  const { orgConfig, updateOrgConfig } = useOrgConfigState({
+    apiGet,
+    apiPost,
+    normalizeOrgConfig,
+  });
+  const [teamStateMap, setTeamStateMap] = useTeamStateMap({
+    orgConfig,
+    defaultStart,
+    defaultEnd,
+    createEmptyTeamState,
+  });
+
+  const [team, setTeam] = useState(()=> (orgConfig.teams?.[0]?.id || 'default'));
+  const [note, setNote] = useState('');
+  const [start, setStart] = useState(defaultStart);
+  const [end, setEnd]     = useState(defaultEnd);
+  const [employees, setEmployees] = useState([]);
+  const [data, setData] = useState({});
+  const [versionId, setVersionId] = useState(null);
+  const [versions, setVersions]   = useState([]);
+  const [versionsLoading, setVersionsLoading] = useState(false);
+  const [versionDeletingId, setVersionDeletingId] = useState(null);
+  const { toast, showToast } = useToast({ defaultDuration: 2600 });
+
+  const { logs, pushLog, logEndRef } = useProgressLog({
+    team,
+    fetchProgressLogs,
+    appendProgressLog
+  });
+  const { prog, setStage, endStage, failStage } = useProgressTracker({ pushLog });
+
+  const batchSelection = useSelectionMap({ employees });
+  const batchChecked = batchSelection.selection;
+  const checkedList = batchSelection.selectedList;
+  const setBatchChecked = batchSelection.setSelection;
+  const replaceBatchChecked = batchSelection.replaceSelection;
+
+  const albumSelection = useSelectionMap({ employees });
+  const albumSelected = albumSelection.selection;
+  const albumCheckedList = albumSelection.selectedList;
+  const setAlbumSelected = albumSelection.setSelection;
+  const replaceAlbumSelected = albumSelection.replaceSelection;
+  const toggleAlbumSelected = albumSelection.toggle;
+  const selectAlbumMany = albumSelection.selectMany;
+  const invertAlbumMany = albumSelection.invertMany;
+  const clearAlbumSelection = albumSelection.clear;
+  const [albumWhiteHour, setAlbumWhiteHour] = useState(0.22);
+  const [albumMidHour, setAlbumMidHour] = useState(0.06);
+  const [albumRangeStartMonth, setAlbumRangeStartMonth] = useState(defaultStart.slice(0,7));
+  const [albumRangeEndMonth, setAlbumRangeEndMonth] = useState(defaultEnd.slice(0,7));
+  const [albumMaxDiff, setAlbumMaxDiff] = useState(0.5);
+  const [albumAssignments, setAlbumAssignments] = useState({});
+  const [albumAutoNote, setAlbumAutoNote] = useState('');
+  const [albumHistory, setAlbumHistory] = useState([]);
+  const [accountPasswordDrafts, setAccountPasswordDrafts] = useState({});
+
+  const [shiftColors, setShiftColors] = useState({ ...defaultShiftColors });
+  const [staffingAlerts, setStaffingAlerts] = useState(()=> normalizeStaffingAlerts());
+  const [adminDays, setAdminDays] = useState(0);
+  const [restPrefs, setRestPrefs] = useState({});
+  const [nightWindows, setNightWindows] = useState([{ s: defaultStart, e: defaultEnd }]);
+  const [nightOverride, setNightOverride] = useState(true);
+  const [nightRules, setNightRules] = useState(()=> normalizeNightRules());
+
+  const [historyProfile, setHistoryProfile] = useState(null);
+
+  const [rMin, setRMin] = useState(0.3);
+  const [rMax, setRMax] = useState(0.7);
+  const [pMin, setPMin] = useState(0.3);
+  const [pMax, setPMax] = useState(0.7);
+  const [mixMax, setMixMax] = useState(1);
+  const [yearlyOptimize, setYearlyOptimize] = useState(false);
+
+  const skipSaveRef = useRef(false);
+  const skipLoadRef = useRef(false);
+  const initializedRef = useRef(false);
+
+  useEffect(()=>{
+    if(skipLoadRef.current){
+      skipLoadRef.current = false;
+      return;
+    }
+    const base = teamStateMap[team];
+    const fallback = createEmptyTeamState(defaultStart, defaultEnd);
+    const merged = base ? { ...fallback, ...base } : fallback;
+    skipSaveRef.current = true;
+    setStart(merged.start || defaultStart);
+    setEnd(merged.end || defaultEnd);
+    setEmployees(Array.isArray(merged.employees) ? merged.employees : []);
+    setData(merged.data || {});
+    setVersionId(merged.versionId || null);
+    setShiftColors(merged.shiftColors ? { ...defaultShiftColors, ...merged.shiftColors } : { ...defaultShiftColors });
+    setStaffingAlerts(normalizeStaffingAlerts(merged.staffingAlerts));
+    setAdminDays(Number(merged.adminDays||0));
+    setRestPrefs(sanitizeRestPrefsMap(merged.restPrefs||{}));
+    const wins = Array.isArray(merged.nightWindows) && merged.nightWindows.length ? merged.nightWindows : [{ s: merged.start || defaultStart, e: merged.end || defaultEnd }];
+    setNightWindows(wins.map(w=> ({ s: w.s || defaultStart, e: w.e || defaultEnd })));
+    setNightOverride(merged.nightOverride !== undefined ? !!merged.nightOverride : true);
+    setNightRules(normalizeNightRules(merged.nightRules));
+    setRMin(typeof merged.rMin === 'number' ? merged.rMin : 0.3);
+    setRMax(typeof merged.rMax === 'number' ? merged.rMax : 0.7);
+    setPMin(typeof merged.pMin === 'number' ? merged.pMin : 0.3);
+    setPMax(typeof merged.pMax === 'number' ? merged.pMax : 0.7);
+    setMixMax(typeof merged.mixMax === 'number' ? merged.mixMax : 1);
+    setYearlyOptimize(merged.yearlyOptimize === true);
+    setNote(typeof merged.note === 'string' ? merged.note : '');
+    replaceBatchChecked(merged.batchChecked || {});
+    replaceAlbumSelected(merged.albumSelected || {});
+    setAlbumWhiteHour(typeof merged.albumWhiteHour === 'number' ? merged.albumWhiteHour : 0.22);
+    setAlbumMidHour(typeof merged.albumMidHour === 'number' ? merged.albumMidHour : 0.06);
+    const startMonth = (merged.albumRangeStartMonth || (merged.start || defaultStart)).slice(0,7);
+    const endMonth = (merged.albumRangeEndMonth || (merged.end || defaultEnd)).slice(0,7);
+    setAlbumRangeStartMonth(startMonth);
+    setAlbumRangeEndMonth(endMonth);
+    setAlbumMaxDiff(typeof merged.albumMaxDiff === 'number' ? merged.albumMaxDiff : 0.5);
+    setAlbumAssignments(merged.albumAssignments || {});
+    setAlbumAutoNote(typeof merged.albumAutoNote === 'string' ? merged.albumAutoNote : '');
+    setAlbumHistory(Array.isArray(merged.albumHistory) ? merged.albumHistory.map(item=> ({ ...item, assignments: item.assignments || {} })) : []);
+    setHistoryProfile(merged.historyProfile || null);
+    initializedRef.current = true;
+  }, [team, teamStateMap, defaultStart, defaultEnd]);
+
+  useEffect(()=>{
+    if(!initializedRef.current) return;
+    if(skipSaveRef.current){
+      skipSaveRef.current = false;
+      return;
+    }
+    const snapshot = {
+      start,
+      end,
+      employees,
+      data,
+      versionId,
+      shiftColors,
+      staffingAlerts,
+      adminDays,
+      restPrefs: sanitizeRestPrefsMap(restPrefs),
+      nightWindows,
+      nightOverride,
+      nightRules,
+      rMin,
+      rMax,
+      pMin,
+      pMax,
+      mixMax,
+      note,
+      batchChecked,
+      albumSelected,
+      albumWhiteHour,
+      albumMidHour,
+      albumRangeStartMonth,
+      albumRangeEndMonth,
+      albumMaxDiff,
+      albumAssignments,
+      albumAutoNote,
+      albumHistory: Array.isArray(albumHistory) ? albumHistory.map(item=> ({ ...item, assignments: item.assignments || {} })) : [],
+      historyProfile,
+      yearlyOptimize
+    };
+    skipLoadRef.current = true;
+    setTeamStateMap(prev=> ({ ...prev, [team]: snapshot }));
+  }, [team, start, end, employees, data, versionId, shiftColors, staffingAlerts, adminDays, restPrefs, nightWindows, nightOverride, nightRules, rMin, rMax, pMin, pMax, mixMax, note, batchChecked, albumSelected, albumWhiteHour, albumMidHour, albumRangeStartMonth, albumRangeEndMonth, albumMaxDiff, albumAssignments, albumAutoNote, albumHistory, historyProfile, yearlyOptimize]);
+
+  const restPrefStore = useMemo(() => createRestPreferenceStore({ sanitizeRestPrefsMap }), [sanitizeRestPrefsMap]);
+  function saveRestForView(){ restPrefStore.save({ team, start, end, prefs: restPrefs }); }
+  function restoreRestForView(target = {}){
+    const cached = restPrefStore.load({
+      team: target.team !== undefined ? target.team : team,
+      start: target.start !== undefined ? target.start : start,
+      end: target.end !== undefined ? target.end : end
+    });
+    if(cached && Object.keys(cached).length){
+      setRestPrefs(cached);
+    }
+  }
+  useEffect(()=>{ if(Object.keys(restPrefs||{}).length) saveRestForView(); }, [restPrefs, team, start, end]);
+  useEffect(()=>{ restoreRestForView(); }, [team, start, end]);
+
+  const teamsList = orgConfig.teams || [];
+  const accountConfig = useMemo(()=>{
+    if(!user) return null;
+    return orgConfig.accounts.find(acc=> acc.username === user.username) || null;
+  }, [orgConfig, user]);
+  const accessibleTeams = useMemo(()=>{
+    if(!user) return teamsList;
+    if(!accountConfig) return teamsList;
+    const access = Array.isArray(accountConfig.teamAccess) && accountConfig.teamAccess.length ? accountConfig.teamAccess : ['*'];
+    if(access.includes('*')) return teamsList;
+    const allow = new Set(access);
+    const filtered = teamsList.filter(t=> allow.has(t.id));
+    return filtered.length ? filtered : teamsList;
+  }, [teamsList, accountConfig, user]);
+  useEffect(()=>{
+    if(!accessibleTeams.some(t=> t.id === team) && accessibleTeams.length){
+      setTeam(accessibleTeams[0].id);
+    }
+  }, [accessibleTeams, team]);
+
+  const activeTeam = useMemo(()=> teamsList.find(t=> t.id === team) || teamsList[0] || { id: team, name: team, features:{ albumScheduler:true } }, [teamsList, team]);
+  const teamFeatures = activeTeam?.features || { albumScheduler:true };
+  const teamDisplayName = activeTeam?.name || team;
+  const canManageRoles = !!(user && user.username === 'admin');
+
+  const menuPerms = useMemo(()=>{
+    const perms = defaultMenuPerms();
+    if(accountConfig && accountConfig.menus){
+      MENU_KEYS.forEach(key=>{
+        const conf = accountConfig.menus[key];
+        if(conf){
+          if(typeof conf.visible === 'boolean') perms[key].visible = conf.visible;
+          if(typeof conf.editable === 'boolean') perms[key].editable = conf.editable;
+        }
+      });
+    }
+    if(teamFeatures && teamFeatures.albumScheduler === false){
+      perms.album.visible = false;
+    }
+    if(canManageRoles){
+      perms.roles.visible = true;
+    } else {
+      perms.roles.visible = false;
+      perms.roles.editable = false;
+    }
+    MENU_KEYS.forEach(key=>{ if(!perms[key].visible) perms[key].editable = false; });
+    return perms;
+  }, [accountConfig, teamFeatures, user]);
+
+  const [tab, setTab] = useState('batch');
+  const allowedTabs = useMemo(()=> MENU_KEYS.filter(key=> menuPerms[key]?.visible), [menuPerms]);
+  useEffect(()=>{
+    if(!allowedTabs.length) return;
+    if(!allowedTabs.includes(tab)){
+      setTab(allowedTabs[0]);
+    }
+  }, [allowedTabs, tab]);
+
+  useEffect(()=>{
+    if(allowedTabs.length === 0 && tab !== 'batch'){
+      setTab('batch');
+    }
+  }, [allowedTabs, tab]);
+
+  const viewReadOnly = menuPerms[tab]?.editable === false;
+  const editingLocked = prog.running || viewReadOnly;
+  useEffect(()=>{ setVersions([]); }, [team]);
+
+  const menuLabels = {
+    grid: '排班表格',
+    batch: '自动分配班次',
+    album: '专辑审核',
+    users: '员工管理',
+    stats: '统计与对齐',
+    history: '历史版本',
+    settings: '设置 / 导出',
+    roles: '角色设置'
+  };
+
+  const addTeam = ()=>{
+    updateOrgConfig(prev=>{
+      const existing = new Set((prev.teams||[]).map(t=>t.id));
+      const newId = ensureUniqueId(`team-${(prev.teams||[]).length+1}`, existing);
+      const newTeam = { id:newId, name:`新团队${(prev.teams||[]).length+1}`, remark:'', features:{ albumScheduler:true } };
+      return { ...prev, teams: [...(prev.teams||[]), newTeam] };
+    });
+  };
+  const updateTeamField = (id, key, value)=>{
+    updateOrgConfig(prev=>({
+      ...prev,
+      teams: prev.teams.map(t=> t.id===id ? { ...t, [key]: value } : t)
+    }));
+  };
+  const updateTeamFeature = (id, key, value)=>{
+    updateOrgConfig(prev=>({
+      ...prev,
+      teams: prev.teams.map(t=> t.id===id ? { ...t, features: { ...(t.features||{}), [key]: value } } : t)
+    }));
+  };
+  const removeTeam = (id)=>{
+    if((orgConfig.teams||[]).length<=1){ alert('至少保留一个团队'); return; }
+    if(!confirm('确定删除该团队及其本地设置？')) return;
+    updateOrgConfig(prev=>({
+      ...prev,
+      teams: prev.teams.filter(t=> t.id!==id)
+    }));
+    setTeamStateMap(prev=>{
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    if(team === id && teamsList.length>0){
+      const fallback = teamsList.find(t=> t.id!==id);
+      if(fallback) setTeam(fallback.id);
+    }
+  };
+
+  const updateAccountConfig = (username, updater)=>{
+    updateOrgConfig(prev=>({
+      ...prev,
+      accounts: prev.accounts.map(acc=> acc.username===username ? updater(acc) : acc)
+    }));
+  };
+  const addAccount = ()=>{
+    updateOrgConfig(prev=>{
+      const base = `user${(prev.accounts||[]).length+1}`;
+      const existing = new Set((prev.accounts||[]).map(acc=>acc.username));
+      let candidate = base;
+      let idx = 1;
+      while(existing.has(candidate) || candidate==='admin'){
+        candidate = `${base}${idx++}`;
+      }
+      const menus = defaultMenuPerms({ roles:{ visible:false, editable:false } });
+      const nextAcc = { username:candidate, displayName:'', role:'guest', passwordHash:'', menus, teamAccess:['*'] };
+      return { ...prev, accounts: [...prev.accounts, nextAcc] };
+    });
+  };
+  const removeAccount = (username)=>{
+    if(username==='admin') return;
+    if(!confirm('确定删除该账号？')) return;
+    updateOrgConfig(prev=>({
+      ...prev,
+      accounts: prev.accounts.filter(acc=> acc.username!==username)
+    }));
+    setAccountPasswordDrafts(prev=>{
+      if(!(username in prev)) return prev;
+      const next = { ...prev }; delete next[username]; return next;
+    });
+    if(user && user.username === username){ setUser(null); }
+  };
+  const setAccountUsername = (username, nextUsername)=>{
+    const trimmed = (nextUsername||'').trim();
+    if(!trimmed || trimmed === 'admin'){
+      alert('账号名不可为空或为 admin');
+      return;
+    }
+    if(orgConfig.accounts.some(acc=> acc.username === trimmed && acc.username !== username)){
+      alert('账号名已存在');
+      return;
+    }
+    updateAccountConfig(username, acc=> ({ ...acc, username: trimmed }));
+    setAccountPasswordDrafts(prev=>{
+      if(!(username in prev)) return prev;
+      const next = { ...prev };
+      next[trimmed] = next[username];
+      delete next[username];
+      return next;
+    });
+    if(user && user.username === username){ setUser(prev=> prev? { ...prev, username: trimmed } : prev); }
+  };
+  const setAccountDisplayName = (username, value)=> updateAccountConfig(username, acc=> ({ ...acc, displayName: value }));
+  const setAccountRole = (username, role)=> updateAccountConfig(username, acc=> ({ ...acc, role }));
+  const setAccountPassword = (username)=>{
+    const raw = accountPasswordDrafts[username] || '';
+    updateAccountConfig(username, acc=> ({ ...acc, passwordHash: hashPassword(raw) }));
+    setAccountPasswordDrafts(prev=> ({ ...prev, [username]: '' }));
+  };
+  const updateAccountPasswordDraft = (username, value)=>{
+    setAccountPasswordDrafts(prev=> ({ ...prev, [username]: value }));
+  };
+  const updateAccountMenu = (username, key, field, value)=>{
+    updateAccountConfig(username, acc=>{
+      const baseMenus = defaultMenuPerms();
+      const current = (acc.menus && acc.menus[key]) ? acc.menus[key] : baseMenus[key];
+      const nextMenus = { ...acc.menus, [key]: { ...current, [field]: value } };
+      if(!nextMenus[key].visible){ nextMenus[key].editable = false; }
+      return { ...acc, menus: nextMenus };
+    });
+  };
+  const setAccountAllTeams = (username, enabled)=>{
+    updateAccountConfig(username, acc=> ({ ...acc, teamAccess: enabled ? ['*'] : [] }));
+  };
+  const toggleAccountTeam = (username, teamId)=>{
+    updateAccountConfig(username, acc=>{
+      if(acc.teamAccess && acc.teamAccess.includes('*')){
+        const rest = teamsList.filter(t=> t.id !== teamId).map(t=>t.id);
+        return { ...acc, teamAccess: rest.length ? rest : ['*'] };
+      }
+      const set = new Set(acc.teamAccess||[]);
+      if(set.has(teamId)){
+        if(set.size<=1){
+          alert('至少保留一个团队');
+          return acc;
+        }
+        set.delete(teamId);
+      } else {
+        set.add(teamId);
+      }
+      if(set.size === teamsList.length){
+        return { ...acc, teamAccess:['*'] };
+      }
+      return { ...acc, teamAccess: Array.from(set) };
+    });
+  };
+
+  const lastLoadedVersionRef = useRef({});
+  const autoLoadedTeamRef = useRef({});
+  useEffect(()=>{ lastLoadedVersionRef.current = {}; autoLoadedTeamRef.current = {}; }, [user?.username]);
+  const autoLoadKey = useMemo(()=>{
+    const safeTeam = team || 'default';
+    const safeStart = (start || '').slice(0,10);
+    const safeEnd = (end || '').slice(0,10);
+    const flag = yearlyOptimize ? 'on' : 'off';
+    return `${safeTeam}__${flag}__${safeStart}__${safeEnd}`;
+  }, [team, start, end, yearlyOptimize]);
+  function applyServerState(payload){
+    if(!payload || typeof payload !== 'object') return;
+    const get = (...keys)=>{
+      for(const key of keys){
+        if(payload[key] !== undefined && payload[key] !== null){
+          return payload[key];
+        }
+      }
+      return undefined;
+    };
+    const viewStart = get('viewStart','view_start','start');
+    const viewEnd = get('viewEnd','view_end','end');
+    const teamId = get('team','team_id');
+    const nextStart = (typeof viewStart === 'string' && viewStart) ? viewStart.slice(0,10) : start;
+    const nextEnd = (typeof viewEnd === 'string' && viewEnd) ? viewEnd.slice(0,10) : end;
+    if(typeof teamId === 'string' && teamId.trim()){ setTeam(teamId.trim()); }
+    if(nextStart){ setStart(nextStart); }
+    if(nextEnd){ setEnd(nextEnd); }
+    const version = get('versionId','version_id');
+    if(version){ setVersionId(version); }
+    const employeesPayload = get('employees');
+    if(Array.isArray(employeesPayload)){ setEmployees(employeesPayload); }
+    const dataPayload = get('data');
+    if(dataPayload && typeof dataPayload === 'object'){ setData(dataPayload); }
+    const restPayload = get('restPrefs','rest_prefs');
+    if(restPayload){ setRestPrefs(sanitizeRestPrefsMap(restPayload)); }
+    const nightRulesPayload = get('nightRules','night_rules');
+    if(nightRulesPayload){ setNightRules(normalizeNightRules(nightRulesPayload)); }
+    const nightWindowsPayload = get('nightWindows','night_windows');
+    if(Array.isArray(nightWindowsPayload) && nightWindowsPayload.length){
+      setNightWindows(nightWindowsPayload.map(w=> ({
+        s: typeof w?.s === 'string' ? w.s : (typeof w?.start === 'string' ? w.start : start),
+        e: typeof w?.e === 'string' ? w.e : (typeof w?.end === 'string' ? w.end : end)
+      })));
+    }
+    const nightOverridePayload = get('nightOverride','night_override');
+    if(typeof nightOverridePayload === 'boolean'){ setNightOverride(nightOverridePayload); }
+    const adminDaysPayload = get('adminDays','admin_days');
+    if(typeof adminDaysPayload === 'number'){ setAdminDays(adminDaysPayload); }
+    const shiftPayload = get('shiftColors','shift_colors');
+    if(shiftPayload && typeof shiftPayload === 'object'){
+      setShiftColors(prev=> ({ ...defaultShiftColors, ...prev, ...shiftPayload }));
+    }
+    const staffingPayload = get('staffingAlerts','staffing_alerts');
+    if(staffingPayload){
+      setStaffingAlerts(normalizeStaffingAlerts(staffingPayload));
+    }
+    const notePayload = get('note','remark');
+    if(typeof notePayload === 'string'){ setNote(notePayload); }
+    const rMinPayload = get('rMin','r_min');
+    if(typeof rMinPayload === 'number'){ setRMin(rMinPayload); }
+    const rMaxPayload = get('rMax','r_max');
+    if(typeof rMaxPayload === 'number'){ setRMax(rMaxPayload); }
+    const pMinPayload = get('pMin','p_min');
+    if(typeof pMinPayload === 'number'){ setPMin(pMinPayload); }
+    const pMaxPayload = get('pMax','p_max');
+    if(typeof pMaxPayload === 'number'){ setPMax(pMaxPayload); }
+    const mixMaxPayload = get('mixMax','mix_max');
+    if(typeof mixMaxPayload === 'number'){ setMixMax(mixMaxPayload); }
+    const batchPayload = get('batchChecked','batch_checked');
+    if(batchPayload && typeof batchPayload === 'object'){ replaceBatchChecked(batchPayload); }
+    const albumSelectedPayload = get('albumSelected','album_selected');
+    if(albumSelectedPayload && typeof albumSelectedPayload === 'object'){ replaceAlbumSelected(albumSelectedPayload); }
+    const albumWhitePayload = get('albumWhiteHour','album_white_hour');
+    if(typeof albumWhitePayload === 'number'){ setAlbumWhiteHour(albumWhitePayload); }
+    const albumMidPayload = get('albumMidHour','album_mid_hour');
+    if(typeof albumMidPayload === 'number'){ setAlbumMidHour(albumMidPayload); }
+    const albumRangeStartPayload = get('albumRangeStartMonth','album_range_start_month');
+    if(typeof albumRangeStartPayload === 'string'){ setAlbumRangeStartMonth(albumRangeStartPayload); }
+    const albumRangeEndPayload = get('albumRangeEndMonth','album_range_end_month');
+    if(typeof albumRangeEndPayload === 'string'){ setAlbumRangeEndMonth(albumRangeEndPayload); }
+    const albumMaxDiffPayload = get('albumMaxDiff','album_max_diff');
+    if(typeof albumMaxDiffPayload === 'number'){ setAlbumMaxDiff(albumMaxDiffPayload); }
+    const albumAssignmentsPayload = get('albumAssignments','album_assignments');
+    if(albumAssignmentsPayload && typeof albumAssignmentsPayload === 'object'){
+      try{
+        setAlbumAssignments(JSON.parse(JSON.stringify(albumAssignmentsPayload)));
+      }catch{
+        setAlbumAssignments({ ...albumAssignmentsPayload });
+      }
+    }
+    const albumAutoNotePayload = get('albumAutoNote','album_auto_note');
+    if(typeof albumAutoNotePayload === 'string'){ setAlbumAutoNote(albumAutoNotePayload); }
+    const albumHistoryPayload = get('albumHistory','album_history');
+    if(Array.isArray(albumHistoryPayload)){
+      setAlbumHistory(albumHistoryPayload.map(item=> ({ ...item, assignments: item?.assignments || {} })));
+    }
+    const historyPayload = get('historyProfile','history_profile');
+    if(historyPayload){ setHistoryProfile(historyPayload); }
+    const yearlyOptimizePayload = get('yearlyOptimize','year_optimize');
+    if(yearlyOptimizePayload !== undefined){
+      const enabled = yearlyOptimizePayload === true || yearlyOptimizePayload === 1 || yearlyOptimizePayload === '1';
+      setYearlyOptimize(enabled);
+    }
+    restoreRestForView({ team: teamId, start: nextStart, end: nextEnd });
+  }
+  async function loadFromServer(){
+    try {
+      const params = new URLSearchParams();
+      if(team) params.set('team', team);
+      if(start) params.set('start', start);
+      if(end) params.set('end', end);
+      if(yearlyOptimize){
+        const yrMatch = (start || '').match(/^(\d{4})/);
+        if(yrMatch){
+          params.set('historyYearStart', `${yrMatch[1]}-01-01`);
+          params.set('yearOptimize', '1');
+        }
+      }
+      const query = params.toString();
+      const res = await apiGet(`/schedule?${query}`);
+      applyServerState({ ...res, versionId: res.version_id || res.versionId });
+      const latestVersion = res.version_id || res.versionId;
+      if(latestVersion){
+        lastLoadedVersionRef.current[team] = latestVersion;
+      }
+    } catch(e){
+      globalErr(e.message);
+    }
+  }
+  async function saveToServer(){
+    try{
+      const operator = (user && (user.display_name || user.username)) || '管理员';
+      const safeNightRules = normalizeNightRules(nightRules);
+      const payload = {
+        team,
+        viewStart: start,
+        viewEnd: end,
+        start,
+        end,
+        employees,
+        data,
+        baseVersionId: versionId,
+        note,
+        operator,
+        adminDays,
+        restPrefs: sanitizeRestPrefsMap(restPrefs),
+        nightRules: safeNightRules,
+        nightWindows,
+        nightOverride,
+        rMin,
+        rMax,
+        pMin,
+        pMax,
+        mixMax,
+        shiftColors,
+        staffingAlerts,
+        batchChecked,
+        albumSelected,
+        albumWhiteHour,
+        albumMidHour,
+        albumRangeStartMonth,
+        albumRangeEndMonth,
+        albumMaxDiff,
+        albumAssignments,
+        albumAutoNote,
+        albumHistory,
+        historyProfile,
+        yearlyOptimize
+      };
+      const res = await apiPost('/schedule/save', payload);
+      applyServerState({ ...payload, versionId: res.version_id || res.versionId || versionId });
+      if(res && (res.version_id || res.versionId)){
+        lastLoadedVersionRef.current[team] = res.version_id || res.versionId;
+      }
+      showToast('已保存新版本', 'success');
+      if(tab === 'history'){
+        loadVersions();
+      }
+    } catch(e){
+      if(e.payload && e.payload.code===409){
+        if(confirm('服务器已有新版本，是否加载最新并覆盖？')) await loadFromServer();
+        return;
+      }
+      globalErr(e.message);
+    }
+  }
+  async function loadVersions(){
+    const trimmedTeam = (team || '').trim();
+    if(!trimmedTeam){
+      globalErr('请选择团队后再刷新历史版本');
+      return;
+    }
+    setVersionsLoading(true);
+    try{
+      const params = new URLSearchParams();
+      params.set('team', trimmedTeam);
+      params.set('start', '1970-01-01');
+      params.set('end', '2100-12-31');
+      const res = await apiGet(`/schedule/versions?${params.toString()}`);
+      const list = Array.isArray(res.versions) ? res.versions.slice() : [];
+      list.sort((a,b)=>{
+        const at = Date.parse(a.created_at || a.createdAt || 0) || 0;
+        const bt = Date.parse(b.created_at || b.createdAt || 0) || 0;
+        return bt - at;
+      });
+      setVersions(list);
+      if(list.length){
+        const latestId = list[0]?.id;
+        if(latestId && lastLoadedVersionRef.current[trimmedTeam] !== latestId){
+          await loadVersionById(latestId, { silent:true });
+        }
+      } else {
+        delete lastLoadedVersionRef.current[trimmedTeam];
+      }
+    } catch(e){
+      globalErr(e.message);
+    } finally {
+      setVersionsLoading(false);
+    }
+  }
+  async function loadVersionById(id, options={}){
+    try{
+      const res = await apiGet(`/version?id=${id}`);
+      applyServerState({ ...res, versionId: id });
+      lastLoadedVersionRef.current[team] = id;
+    } catch(e){
+      if(!options?.silent){
+        globalErr(e.message);
+      }
+    }
+  }
+  async function deleteVersionById(id){
+    if(!id) return;
+    if(!confirm('确定删除该历史版本吗？删除后无法恢复。')) return;
+    const trimmedTeam = (team || '').trim();
+    if(!trimmedTeam){
+      globalErr('请选择团队后再操作');
+      return;
+    }
+    setVersionDeletingId(id);
+    try{
+      await apiPost('/schedule/version/delete', { id, team: trimmedTeam });
+      setVersions(prev=> prev.filter(v=> v.id !== id));
+      if(lastLoadedVersionRef.current[trimmedTeam] === id){
+        delete lastLoadedVersionRef.current[trimmedTeam];
+      }
+      showToast('已删除历史版本', 'success');
+      await loadVersions();
+    } catch(e){
+      globalErr(e.message);
+    } finally {
+      setVersionDeletingId(null);
+    }
+  }
+  useEffect(()=>{
+    if(!user) return;
+    if(!team) return;
+    const key = autoLoadKey;
+    if(autoLoadedTeamRef.current[key]) return;
+    autoLoadedTeamRef.current[key] = true;
+    loadFromServer();
+  }, [autoLoadKey, team, user]);
+  async function doLogout(){ try{ await apiPost('/logout',{}); setUser(null);}catch{} }
+  function exportExcel(){ const url = `${API_BASE}/export/xlsx?team=${encodeURIComponent(team)}&start=${start}&end=${end}`; window.location.href=url; }
+
+  useEffect(()=>{
+    if(tab === 'history'){
+      loadVersions();
+    }
+  }, [tab, team]);
+
+  const dateList = useMemo(()=> enumerateDates(start, end), [start,end]);
+
+  function clearRange(mode='empty'){
+    setData(prev=>{ const next={...prev}; for(const d of dateList){ const r={...(next[d]||{})}; for(const e of employees){ r[e] = (mode==='rest')? '休' : ''; } next[d]=r; } return next; });
+  }
+
+  const dailyStats = useMemo(()=>{ const m={}; for(const d of dateList){ const row=data[d]||{}; const stat={总:0, 白:0, 中1:0, 中2:0, 夜:0}; for(const e of employees){ const v=row[e]; if(!v || v==='休') continue; stat['总']++; if(v==='白') stat['白']++; else if(v==='中1') stat['中1']++; else if(v==='中2') stat['中2']++; else if(v==='夜') stat['夜']++; } m[d]=stat; } return m; }, [data, dateList, employees]);
+
+  const nightIssues = useMemo(()=>{ const issues={}; function inAnyWin(day){ for(const w of nightWindows){ if(!w.s||!w.e) continue; if(day>=w.s && day<=w.e) return true; } return false; } for(const d of dateList){ if(!inAnyWin(d)) continue; const row=data[d]||{}; const vals=Object.values(row); const hasN = vals.includes('夜'); const hasM2 = vals.includes('中2'); let msg=''; if(!hasN && !hasM2) msg='缺夜&中2'; else if(!hasN) msg='缺夜'; else if(!hasM2) msg='缺中2'; if(msg) issues[d]=msg; } return issues; }, [nightWindows, data, dateList]);
+
+  const gridEmpCounts = useMemo(()=> countByEmpInRange(employees, data, start, end), [employees, data, start, end]);
+
+  const ViewGrid = (
+    <ScheduleGridSection
+      employees={employees}
+      dateList={dateList}
+      data={data}
+      setData={setData}
+      editingLocked={editingLocked}
+      shiftColors={shiftColors}
+      shiftOptions={SHIFT_TYPES}
+      adminDays={adminDays}
+      gridEmpCounts={gridEmpCounts}
+      staffingAlerts={staffingAlerts}
+      styleForStaffing={styleForStaffing}
+      nightIssues={nightIssues}
+      dailyStats={dailyStats}
+      dow={dow}
+      WN={WN}
+    />
+  );
+
+  const handleRunMainRule = async () => {
+    const targets = checkedList.length ? checkedList : employees;
+    if (targets.length === 0) {
+      alert('请先勾选人员');
+      return;
+    }
+
+    try {
+      await runAutoScheduleFlow({
+        employees: targets,
+        data,
+        start,
+        end,
+        restPrefs,
+        mixMax,
+        rMin,
+        rMax,
+        pMin,
+        pMax,
+        adminDays,
+        historyProfile,
+        yearlyOptimize,
+        onStage: setStage,
+        onLog: pushLog,
+        onData: setData
+      });
+      endStage();
+    } catch (error) {
+      console.error('自动排班失败', error);
+      const errMsg = `错误：${error?.message || error}`;
+      failStage(errMsg);
+      alert(error?.message ? `自动排班失败：${error.message}` : '自动排班失败');
+    }
+  };
+
+  const handleAssignNight = () => {
+    if (editingLocked) {
+      alert('执行中：请稍后再试');
+      return;
+    }
+    if (checkedList.length === 0) {
+      alert('请先勾选人员');
+      return;
+    }
+    const next = assignNightForWindows({
+      employees: checkedList,
+      data,
+      nightWindows,
+      nightOverride,
+      nightRules,
+      restPrefs
+    });
+    setData(next);
+  };
+
+  const ViewBatch = (
+    <BatchAssignSection
+      employees={employees}
+      batchChecked={batchChecked}
+      setBatchChecked={setBatchChecked}
+      editingLocked={editingLocked}
+      progRunning={prog.running}
+      rMin={rMin}
+      rMax={rMax}
+      pMin={pMin}
+      pMax={pMax}
+      mixMax={mixMax}
+      setRMin={setRMin}
+      setRMax={setRMax}
+      setPMin={setPMin}
+      setPMax={setPMax}
+      setMixMax={setMixMax}
+      nightWindows={nightWindows}
+      setNightWindows={setNightWindows}
+      nightOverride={nightOverride}
+      setNightOverride={setNightOverride}
+      nightRules={nightRules}
+      setNightRules={setNightRules}
+      start={start}
+      end={end}
+      onRunMainRule={handleRunMainRule}
+      onAssignNight={handleAssignNight}
+      hasSelection={checkedList.length > 0}
+    />
+  );
+
+  const albumRange = useMemo(()=>{
+    const spanStart = monthKeyToSpan(albumRangeStartMonth);
+    const spanEnd = monthKeyToSpan(albumRangeEndMonth);
+    if(!spanStart || !spanEnd) return null;
+    let s = spanStart.start;
+    let e = spanEnd.end;
+    if(s > e){ const tmp = s; s = spanEnd.start; e = spanStart.end; }
+    const clipStart = s < start ? start : s;
+    const clipEnd = e > end ? end : e;
+    if(clipStart > clipEnd) return null;
+    return { start: clipStart, end: clipEnd };
+  }, [albumRangeStartMonth, albumRangeEndMonth, start, end]);
+  const albumDates = useMemo(()=> albumRange? enumerateDates(albumRange.start, albumRange.end) : [], [albumRange]);
+
+  useEffect(()=>{
+    if(albumDates.length===0){
+      setAlbumAssignments(prev=> Object.keys(prev||{}).length? {} : prev);
+      return;
+    }
+    setAlbumAssignments(prev=>{
+      const set = new Set(albumDates);
+      let changed = false;
+      const next = {};
+      albumDates.forEach(d=>{
+        if(prev && prev[d]){
+          next[d] = prev[d];
+        } else {
+          next[d] = { white:'', mid:'' };
+          changed = true;
+        }
+      });
+      if(prev){
+        for(const key of Object.keys(prev)){
+          if(!set.has(key)){
+            changed = true;
+            break;
+          }
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [albumDates]);
+
+  useEffect(()=>{
+    if(albumCheckedList.length===0){
+      setAlbumAssignments(prev=>{
+        if(!prev || Object.keys(prev).length===0) return prev;
+        const cleared={};
+        Object.keys(prev).forEach(day=>{ cleared[day] = { white:'', mid:'' }; });
+        return cleared;
+      });
+      return;
+    }
+    setAlbumAssignments(prev=>{
+      if(!prev) return prev;
+      const sel = new Set(albumCheckedList);
+      let changed = false;
+      const next = {};
+      Object.entries(prev).forEach(([day, info])=>{
+        const safe = info || { white:'', mid:'' };
+        const white = sel.has(safe.white) ? safe.white : '';
+        const mid = sel.has(safe.mid) ? safe.mid : '';
+        if(white!==safe.white || mid!==safe.mid) changed = true;
+        next[day] = { white, mid };
+      });
+      return changed ? next : prev;
+    });
+  }, [albumCheckedList]);
+
+  useEffect(()=>{
+    if(albumCheckedList.length===0 || albumDates.length===0){
+      setAlbumAutoNote('');
+    }
+  }, [albumCheckedList, albumDates]);
+
+  const albumWhiteHourValue = Number(albumWhiteHour) || 0;
+  const albumMidHourValue = Number(albumMidHour) || 0;
+  const albumStats = useMemo(()=>{
+    const base = {};
+    albumCheckedList.forEach(emp=>{
+      base[emp] = { whiteDays:0, midDays:0, whiteHours:0, midHours:0, totalHours:0 };
+    });
+    albumDates.forEach(day=>{
+      const info = albumAssignments[day] || {};
+      if(info.white && base[info.white]){
+        base[info.white].whiteDays += 1;
+        base[info.white].whiteHours += albumWhiteHourValue;
+        base[info.white].totalHours += albumWhiteHourValue;
+      }
+      if(info.mid && base[info.mid]){
+        base[info.mid].midDays += 1;
+        base[info.mid].midHours += albumMidHourValue;
+        base[info.mid].totalHours += albumMidHourValue;
+      }
+    });
+    return albumCheckedList.map(emp=> ({ emp, ...base[emp] }));
+  }, [albumAssignments, albumDates, albumCheckedList, albumWhiteHourValue, albumMidHourValue]);
+  const albumTotals = useMemo(()=> albumStats.reduce((acc,row)=>{
+    acc.whiteDays += row.whiteDays;
+    acc.midDays += row.midDays;
+    acc.whiteHours += row.whiteHours;
+    acc.midHours += row.midHours;
+    acc.totalHours += row.totalHours;
+    return acc;
+  }, { whiteDays:0, midDays:0, whiteHours:0, midHours:0, totalHours:0 }), [albumStats]);
+  const albumDiff = useMemo(()=>{
+    if(albumStats.length===0) return 0;
+    const totals = albumStats.map(r=> r.totalHours);
+    return totals.length? Math.max(...totals) - Math.min(...totals) : 0;
+  }, [albumStats]);
+  const albumCoverage = useMemo(()=>{
+    const totalDays = albumDates.length;
+    let whiteAssigned = 0;
+    let midAssigned = 0;
+    albumDates.forEach(day=>{
+      const info = albumAssignments[day] || {};
+      if(info.white) whiteAssigned += 1;
+      if(info.mid) midAssigned += 1;
+    });
+    return { totalDays, whiteAssigned, midAssigned };
+  }, [albumDates, albumAssignments]);
+
+  const exportAlbumPlan = ()=>{
+    if(albumDates.length===0){
+      alert('暂无可导出的专辑审核排班数据');
+      return;
+    }
+    const escape = (val)=> String(val||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+    const headerHtml = '<tr><th>日期</th><th>星期</th><th>白班审核人</th><th>中班审核人</th></tr>';
+    const bodyHtml = albumDates.map(day=>{
+      const info = albumAssignments[day] || { white:'', mid:'' };
+      const weekLabel = '周' + WN[new Date(day).getDay()];
+      return `<tr><td>${escape(day)}</td><td>${escape(weekLabel)}</td><td>${escape(info.white||'')}</td><td>${escape(info.mid||'')}</td></tr>`;
+    }).join('');
+    const tableHtml = `<table>${headerHtml}${bodyHtml}</table>`;
+    const blob = new Blob(['\ufeff' + tableHtml], { type: 'application/vnd.ms-excel' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const rangeLabel = albumRange ? `_${albumRange.start}_${albumRange.end}` : '';
+    link.href = url;
+    link.download = `专辑审核排班表${rangeLabel}.xls`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(()=> URL.revokeObjectURL(url), 200);
+  };
+
+  const confirmAlbumPlan = ()=>{
+    if(editingLocked){ alert('执行中：请稍后再试'); return; }
+    if(!albumRange || albumDates.length===0){ alert('请先设置有效的月份范围并生成排班'); return; }
+    const snapshot = {};
+    albumDates.forEach(day=>{
+      const info = albumAssignments[day] || { white:'', mid:'' };
+      snapshot[day] = { white: info.white || '', mid: info.mid || '' };
+    });
+    const hasAny = Object.values(snapshot).some(info=> info.white || info.mid);
+    if(!hasAny && !confirm('当前排班表全部未分配，仍然确认并保存吗？')) return;
+    const existingIdx = albumHistory.findIndex(item=> item?.range?.start===albumRange.start && item?.range?.end===albumRange.end);
+    if(existingIdx>=0 && !confirm('该时间范围已存在确认排班，继续将覆盖历史记录，是否继续？')) return;
+    const entry = {
+      id: `album-${Date.now()}`,
+      savedAt: new Date().toISOString(),
+      range: { start: albumRange.start, end: albumRange.end },
+      assignments: snapshot,
+      whiteHour: albumWhiteHourValue,
+      midHour: albumMidHourValue,
+      totals: { ...albumTotals },
+      diff: albumDiff,
+      coverage: { ...albumCoverage }
+    };
+    setAlbumHistory(prev=>{
+      const next = existingIdx>=0 ? prev.filter((_,idx)=> idx!==existingIdx) : prev.slice();
+      return [entry, ...next];
+    });
+    setAlbumAutoNote('排班已确认并保存，可在统计视图查看历史与分析。');
+  };
+
+  const autoAssignAlbum = ()=>{
+    if(editingLocked){ alert('执行中：请稍后再试'); return; }
+    if(albumCheckedList.length===0){ alert('请先在左侧勾选参与专辑审核的人员'); return; }
+    if(albumDates.length===0){ alert('请先设置有效的月份范围，并确保与当前排班范围有交集'); return; }
+    const diffLimitRaw = Number(albumMaxDiff);
+    const diffLimit = Number.isFinite(diffLimitRaw) ? Math.max(0, diffLimitRaw) : Infinity;
+    const statsMap = {};
+    albumCheckedList.forEach(emp=>{ statsMap[emp] = { total:0, whiteHours:0, midHours:0, whiteDays:0, midDays:0 }; });
+    const plan = {};
+    let usedFallback = false;
+    let missingCandidate = false;
+    const chooseCandidate = (candidates, type, hourValue)=>{
+      if(candidates.length===0){ missingCandidate = true; return ''; }
+      const sorted = [...candidates].sort((a,b)=>{
+        if(statsMap[a].total !== statsMap[b].total) return statsMap[a].total - statsMap[b].total;
+        if(type==='white' && statsMap[a].whiteDays !== statsMap[b].whiteDays) return statsMap[a].whiteDays - statsMap[b].whiteDays;
+        if(type==='mid' && statsMap[a].midDays !== statsMap[b].midDays) return statsMap[a].midDays - statsMap[b].midDays;
+        return a.localeCompare(b, 'zh-CN');
+      });
+      const feasible = sorted.filter(emp=>{
+        if(diffLimit===Infinity) return true;
+        const totals = albumCheckedList.map(name=> name===emp ? statsMap[name].total + hourValue : statsMap[name].total);
+        const maxVal = Math.max(...totals);
+        const minVal = Math.min(...totals);
+        return (maxVal - minVal) <= diffLimit + 1e-9;
+      });
+      const pick = feasible.length? feasible[0] : sorted[0];
+      if(!feasible.length && diffLimit!==Infinity) usedFallback = true;
+      statsMap[pick].total += hourValue;
+      if(type==='white'){ statsMap[pick].whiteHours += hourValue; statsMap[pick].whiteDays += 1; }
+      if(type==='mid'){ statsMap[pick].midHours += hourValue; statsMap[pick].midDays += 1; }
+      return pick;
+    };
+    albumDates.forEach(day=>{
+      const row = data[day] || {};
+      const whiteCandidates = albumCheckedList.filter(emp=> row[emp]==='白');
+      const midCandidates = albumCheckedList.filter(emp=> row[emp]==='中1');
+      const white = chooseCandidate(whiteCandidates, 'white', albumWhiteHourValue);
+      const mid = chooseCandidate(midCandidates, 'mid', albumMidHourValue);
+      plan[day] = { white: white||'', mid: mid||'' };
+    });
+    setAlbumAssignments(plan);
+    if(missingCandidate){
+      setAlbumAutoNote('部分日期缺少符合条件的白班或中1人员，请检查并手动补充。');
+    } else if(usedFallback){
+      setAlbumAutoNote('已尽量平均分配，但存在超出差值限制的情况，请复核。');
+    } else {
+      setAlbumAutoNote('自动生成完成，可继续手动微调，统计实时更新。');
+    }
+  };
+
+  const updateAlbumAssignment = (day, field, value)=>{
+    setAlbumAssignments(prev=> ({
+      ...prev,
+      [day]: { ...(prev?.[day]||{ white:'', mid:'' }), [field]: value }
+    }));
+    setAlbumAutoNote('排班已更新，右侧统计已同步。');
+  };
+
+  const handleAlbumToggle = (name) => {
+    toggleAlbumSelected(name);
+  };
+  const handleAlbumSelectAll = (names = []) => {
+    if (!Array.isArray(names) || names.length === 0) return;
+    selectAlbumMany(names, true);
+  };
+  const handleAlbumSelectInverse = (names = []) => {
+    if (!Array.isArray(names) || names.length === 0) return;
+    invertAlbumMany(names);
+  };
+  const handleAlbumSelectClear = (names = []) => {
+    if (!Array.isArray(names) || names.length === 0) {
+      clearAlbumSelection();
+      return;
+    }
+    selectAlbumMany(names, false);
+  };
+
+  const ViewAlbum = (
+    <AlbumSection
+      employees={employees}
+      albumSelected={albumSelected}
+      albumCheckedList={albumCheckedList}
+      editingLocked={editingLocked}
+      onToggleEmployee={handleAlbumToggle}
+      onSelectAllEmployees={handleAlbumSelectAll}
+      onSelectInverseEmployees={handleAlbumSelectInverse}
+      onClearSelectedEmployees={handleAlbumSelectClear}
+      albumRangeStartMonth={albumRangeStartMonth}
+      albumRangeEndMonth={albumRangeEndMonth}
+      onChangeRangeStart={setAlbumRangeStartMonth}
+      onChangeRangeEnd={setAlbumRangeEndMonth}
+      albumWhiteHour={albumWhiteHour}
+      onChangeWhiteHour={setAlbumWhiteHour}
+      albumMidHour={albumMidHour}
+      onChangeMidHour={setAlbumMidHour}
+      albumMaxDiff={albumMaxDiff}
+      onChangeMaxDiff={setAlbumMaxDiff}
+      autoAssignAlbum={autoAssignAlbum}
+      albumAutoNote={albumAutoNote}
+      albumRange={albumRange}
+      albumDates={albumDates}
+      confirmAlbumPlan={confirmAlbumPlan}
+      exportAlbumPlan={exportAlbumPlan}
+      albumAssignments={albumAssignments}
+      updateAlbumAssignment={updateAlbumAssignment}
+      data={data}
+      shiftColors={shiftColors}
+      albumStats={albumStats}
+      albumTotals={albumTotals}
+      albumDiff={albumDiff}
+      albumCoverage={albumCoverage}
+      WN={WN}
+    />
+  );
+
+  const [empInput, setEmpInput] = useState('');
+  const restForecast = useMemo(()=>{
+    const base = {1:0,2:0,3:0,4:0,5:0,6:0,7:0};
+    employees.forEach(emp=>{
+      const pref = restPrefs[emp];
+      if(!pref) return;
+      const restDays = pairToSet(pref);
+      for(let w=1; w<=7; w++){
+        if(!restDays.has(w)) base[w]+=1;
+      }
+    });
+    return base;
+  }, [employees, restPrefs]);
+  const hasRestForecast = useMemo(()=> employees.some(emp=> !!restPrefs[emp]), [employees, restPrefs]);
+  const handleBulkAddEmployees = () => {
+    const names = (empInput || '').split(/\n|,|\s+/).map((n) => (n || '').trim()).filter(Boolean);
+    if (names.length === 0) {
+      setEmpInput('');
+      return;
+    }
+    setEmployees((prev) => {
+      const existing = new Set(prev);
+      const next = [...prev];
+      let changed = false;
+      names.forEach((name) => {
+        if (!existing.has(name)) {
+          existing.add(name);
+          next.push(name);
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+    setEmpInput('');
+  };
+
+  const handleRestPrefChange = (emp, pair) => {
+    const sanitized = sanitizeRestPairValue(pair);
+    setRestPrefs((prev) => {
+      const current = prev && typeof prev === 'object' ? prev[emp] : undefined;
+      if (sanitized) {
+        if (current === sanitized) return prev;
+        return { ...(prev || {}), [emp]: sanitized };
+      }
+      if (!prev || !(emp in prev)) return prev;
+      const next = { ...prev };
+      delete next[emp];
+      return next;
+    });
+  };
+
+  const handleRestPrefClear = (emp) => {
+    setRestPrefs((prev) => {
+      if (!prev || !(emp in prev)) return prev;
+      const next = { ...prev };
+      delete next[emp];
+      return next;
+    });
+  };
+
+  const handleDeleteEmployee = (emp) => {
+    setEmployees((prev) => prev.filter((name) => name !== emp));
+    setData((prev) => {
+      const source = prev || {};
+      let changed = false;
+      const next = {};
+      Object.keys(source).forEach((day) => {
+        const row = source[day];
+        if (row && Object.prototype.hasOwnProperty.call(row, emp)) {
+          const clone = { ...row };
+          delete clone[emp];
+          next[day] = clone;
+          changed = true;
+        } else {
+          next[day] = row;
+        }
+      });
+      return changed ? next : prev;
+    });
+    setRestPrefs((prev) => {
+      if (!prev || !(emp in prev)) return prev;
+      const next = { ...prev };
+      delete next[emp];
+      return next;
+    });
+    setAlbumSelected((prev) => {
+      if (!prev || !(emp in prev)) return prev;
+      const next = { ...prev };
+      delete next[emp];
+      return next;
+    });
+  };
+
+  const ViewEmployees = (
+    <EmployeesSection
+      employees={employees}
+      restPrefs={restPrefs}
+      restForecast={restForecast}
+      hasRestForecast={hasRestForecast}
+      empInput={empInput}
+      editingLocked={editingLocked}
+      restPairs={REST_PAIRS}
+      onEmpInputChange={setEmpInput}
+      onBulkAdd={handleBulkAddEmployees}
+      onRestPrefChange={handleRestPrefChange}
+      onRestPrefClear={handleRestPrefClear}
+      onDeleteEmployee={handleDeleteEmployee}
+      onSave={saveToServer}
+    />
+  );
+
+  function periodRanges(){
+    const dS=new Date(start);
+    const yS = fmt(new Date(dS.getFullYear(),0,1)); const yE = fmt(new Date(dS.getFullYear(),11,31));
+    const q = Math.floor(dS.getMonth()/3); const qS = fmt(new Date(dS.getFullYear(), q*3, 1)); const qE = fmt(new Date(dS.getFullYear(), q*3+3, 0));
+    const mS = fmt(new Date(dS.getFullYear(), dS.getMonth(), 1)); const mE = fmt(new Date(dS.getFullYear(), dS.getMonth()+1, 0));
+    return { y:{s:yS,e:yE}, q:{s:qS,e:qE}, m:{s:mS,e:mE}, r:{s:start,e:end} };
+  }
+  const ViewStats = (()=>{
+    const ranges = periodRanges();
+    const [statPeriod, setStatPeriod] = useState('r');
+    const [statView, setStatView] = useState('person');
+    const [showRestCounts, setShowRestCounts] = useState(true);
+    const [orderBy, setOrderBy] = useState('default');
+    const [albumStatMode, setAlbumStatMode] = useState('analysis');
+    const cur = statPeriod==='y'? ranges.y : statPeriod==='q'? ranges.q : statPeriod==='m'? ranges.m : ranges.r;
+    const daysLen = useMemo(()=> enumerateDates(cur.s, cur.e).length, [cur.s, cur.e]);
+    const C = useMemo(()=> countByEmpInRange(employees, data, cur.s, cur.e), [employees,data,statPeriod,start,end]);
+    const avg = useMemo(()=>{ const sum={白:0,中1:0,中2:0,夜:0,总:0}; for(const e of employees){ sum.白+=C[e]?.白||0; sum.中1+=C[e]?.中1||0; sum.中2+=C[e]?.中2||0; sum.夜+=C[e]?.夜||0; sum.总+=C[e]?.总||0; } const n = Math.max(1, employees.length); return { 白:(sum.白/n).toFixed(1), 中1:(sum.中1/n).toFixed(1), 中2:(sum.中2/n).toFixed(1), 夜:(sum.夜/n).toFixed(1), 总:(sum.总/n).toFixed(1) }; }, [employees, C]);
+
+    // —— 新增：每日分布与总和分析 ——
+    const monthSpans = useMemo(()=> monthListBetween(cur.s, cur.e), [cur.s, cur.e]);
+    const daySeries = useMemo(()=>{
+      const list = enumerateDates(cur.s, cur.e);
+      return list.map(d=>{
+        const row = data[d]||{}; let W=0,M=0,N2=0,N=0; for(const e of employees){ const v=row[e]; if(!v||v==='休') continue; if(v==='白') W++; else if(v==='中1') M++; else if(v==='中2') N2++; else if(v==='夜') N++; } const total=W+M+N2+N; return { d, W, M, N2, N, total };
+      });
+    }, [data, employees, cur.s, cur.e]);
+    const sumTotals = useMemo(()=> daySeries.reduce((acc,s)=>{ acc.白+=s.W; acc.中1+=s.M; acc.中2+=s.N2; acc.夜+=s.N; acc.总+=s.total; return acc; }, {白:0,中1:0,中2:0,夜:0,总:0}), [daySeries]);
+    const totalDays = daySeries.length;
+    const dailyAvg = {
+      总: totalDays? (sumTotals.总/totalDays).toFixed(1) : '0.0',
+      白: totalDays? (sumTotals.白/totalDays).toFixed(1) : '0.0',
+      中1: totalDays? (sumTotals.中1/totalDays).toFixed(1) : '0.0'
+    };
+    const restTotal = useMemo(()=> employees.length*daysLen - sumTotals.总, [employees.length, daysLen, sumTotals.总]);
+    const peakMid = useMemo(()=> daySeries.reduce((best,s)=> s.M>best.val ? {d:s.d, val:s.M} : best, {d:'—', val:-1}), [daySeries]);
+    const peakWhite = useMemo(()=> daySeries.reduce((best,s)=> s.W>best.val ? {d:s.d, val:s.W} : best, {d:'—', val:-1}), [daySeries]);
+
+    const restCycles = useMemo(()=>{
+      return employees.map(emp=>{
+        const months = {};
+        monthSpans.forEach(span=>{
+          const clipStart = cur.s > span.start ? cur.s : span.start;
+          const clipEnd = cur.e < span.end ? cur.e : span.end;
+          if(clipStart > clipEnd){
+            months[span.key] = { display:'', bestPair:'', counts:{}, hasData:false };
+            return;
+          }
+          const dates = enumerateDates(clipStart, clipEnd);
+          let hasData = false;
+          const weekMap = {};
+          dates.forEach(day=>{
+            const row = data[day];
+            if(!row) return;
+            const v = row[emp];
+            if(v){ hasData = true; }
+            if(v === '休'){
+              const wk = weekStartKey(day);
+              if(!weekMap[wk]) weekMap[wk] = [];
+              weekMap[wk].push(day);
+            }
+          });
+          if(!hasData){
+            months[span.key] = { display:'', bestPair:'', counts:{}, hasData:false };
+            return;
+          }
+          const counts = {};
+          Object.values(weekMap).forEach(days=>{
+            if(days.length < 2) return;
+            const sortedDays = days.slice().sort();
+            const rawPair = sortedDays.slice(0,2).map(day=> dayToW(day)).join('');
+            const pair = normalizeRestPair(rawPair);
+            if(pair){ counts[pair] = (counts[pair]||0) + 1; }
+          });
+          if(!Object.keys(counts).length){
+            months[span.key] = { display:'—', bestPair:'', counts:{}, hasData:true };
+            return;
+          }
+          let bestPair = '';
+          let bestCount = -1;
+          Object.entries(counts).forEach(([pair,count])=>{
+            if(count > bestCount || (count === bestCount && pair < bestPair)){
+              bestPair = pair;
+              bestCount = count;
+            }
+          });
+          months[span.key] = {
+            display: bestPair ? `休${bestPair}` : '—',
+            bestPair: bestPair || '',
+            counts,
+            hasData:true
+          };
+        });
+        return { emp, months };
+      });
+    }, [employees, data, monthSpans, cur.s, cur.e]);
+
+    const restPairAverages = useMemo(()=>{
+      if(monthSpans.length===0){
+        return REST_PAIRS.map(pair=> ({ pair, avg:'0.0' }));
+      }
+      const totals = REST_PAIRS.reduce((acc,p)=>{ acc[p]=0; return acc; }, {});
+      monthSpans.forEach(span=>{
+        restCycles.forEach(row=>{
+          const info = row.months[span.key];
+          const pair = info?.bestPair;
+          if(pair && (pair in totals)) totals[pair] += 1;
+        });
+      });
+      return REST_PAIRS.map(pair=> ({ pair, avg: (totals[pair]/monthSpans.length).toFixed(1) }));
+    }, [restCycles, monthSpans]);
+    const restCycleTotals = useMemo(()=>{
+      return restCycles.map(row=>{
+        const totals = REST_PAIRS.reduce((acc,p)=>{ acc[p]=0; return acc; }, {});
+        let effective = 0;
+        monthSpans.forEach(span=>{
+          const info = row.months?.[span.key];
+          if(info?.hasData){
+            effective += 1;
+            if(info.bestPair && (info.bestPair in totals)) totals[info.bestPair] += 1;
+          }
+        });
+        return { emp: row.emp, totals, effective };
+      });
+    }, [restCycles, monthSpans]);
+
+    const albumEntriesInRange = useMemo(()=> albumHistory.filter(entry=>{
+      if(!entry || !entry.range) return false;
+      const rs = entry.range.start;
+      const re = entry.range.end;
+      if(!rs || !re) return false;
+      return !(re < cur.s || rs > cur.e);
+    }), [albumHistory, cur.s, cur.e]);
+    const albumAnalysis = useMemo(()=>{
+      const perEmp = {};
+      const employeeSet = new Set();
+      const summary = { batches: albumEntriesInRange.length, whiteDays:0, midDays:0, whiteHours:0, midHours:0, totalHours:0 };
+      albumEntriesInRange.forEach(entry=>{
+        const assignments = entry.assignments || {};
+        const whiteHour = Number(entry.whiteHour)||0;
+        const midHour = Number(entry.midHour)||0;
+        Object.entries(assignments).forEach(([day, info])=>{
+          if(day < cur.s || day > cur.e) return;
+          const whiteName = info?.white || '';
+          const midName = info?.mid || '';
+          if(whiteName){
+            if(!perEmp[whiteName]) perEmp[whiteName] = { whiteDays:0, whiteHours:0, midDays:0, midHours:0 };
+            perEmp[whiteName].whiteDays += 1;
+            perEmp[whiteName].whiteHours += whiteHour;
+            summary.whiteDays += 1;
+            summary.whiteHours += whiteHour;
+            summary.totalHours += whiteHour;
+            employeeSet.add(whiteName);
+          }
+          if(midName){
+            if(!perEmp[midName]) perEmp[midName] = { whiteDays:0, whiteHours:0, midDays:0, midHours:0 };
+            perEmp[midName].midDays += 1;
+            perEmp[midName].midHours += midHour;
+            summary.midDays += 1;
+            summary.midHours += midHour;
+            summary.totalHours += midHour;
+            employeeSet.add(midName);
+          }
+        });
+      });
+      const rows = Object.entries(perEmp).map(([emp,val])=> ({
+        emp,
+        whiteDays: val.whiteDays,
+        whiteHours: val.whiteHours,
+        midDays: val.midDays,
+        midHours: val.midHours,
+        totalHours: (val.whiteHours || 0) + (val.midHours || 0)
+      })).sort((a,b)=> b.totalHours - a.totalHours || a.emp.localeCompare(b.emp,'zh-CN'));
+      const batches = summary.batches || 0;
+      const employeeCount = employeeSet.size;
+      return {
+        rows,
+        summary: {
+          ...summary,
+          employeeCount,
+          avgTotalHoursPerBatch: batches? summary.totalHours / batches : 0,
+          avgWhiteHoursPerBatch: batches? summary.whiteHours / batches : 0,
+          avgMidHoursPerBatch: batches? summary.midHours / batches : 0,
+          avgHoursPerEmployee: employeeCount? summary.totalHours / employeeCount : 0
+        }
+      };
+    }, [albumEntriesInRange, cur.s, cur.e]);
+    const albumHistoryForView = useMemo(()=> albumEntriesInRange.slice().sort((a,b)=>{
+      return new Date(b?.savedAt || 0) - new Date(a?.savedAt || 0);
+    }), [albumEntriesInRange]);
+    const albumSummary = albumAnalysis.summary || { batches:0, whiteDays:0, midDays:0, whiteHours:0, midHours:0, totalHours:0, employeeCount:0, avgTotalHoursPerBatch:0, avgWhiteHoursPerBatch:0, avgMidHoursPerBatch:0, avgHoursPerEmployee:0 };
+    const albumRows = albumAnalysis.rows || [];
+
+    const rows = useMemo(()=>{
+      const arr = employees.map(e=>{
+        const total=C[e]?.总||0; const W=C[e]?.白||0; const M=C[e]?.中1||0; const N2=C[e]?.中2||0; const N=C[e]?.夜||0;
+        const ratio = (W>0? (M/W) : (M>0? Infinity:0));
+        const ratioStr = (ratio===Infinity? '∞' : ratio.toFixed(2));
+        const diff = total - Number(adminDays||0);
+        const restDays = daysLen - total; // 统计期内的休/空
+        const cycTot = cyclesForEmp(data, e, cur.s, cur.e).length; const cycMix = mixedCyclesCount(data, e, cur.s, cur.e); const cycRatio = cycTot>0? (cycMix/cycTot) : 0;
+        const longest = longestRun(data, e, cur.s, cur.e);
+        const pass = (ratio!==Infinity && W>0) ? (ratio >= pMin && ratio <= pMax) : (W===0? (M===0) : false);
+        const mixOk = cycRatio <= (mixMax||1);
+        return { e, W, M, N2, N, total, diff, ratio, ratioStr, restDays, cycTot, cycMix, cycRatio, longest, pass, mixOk };
+      });
+      switch(orderBy){
+        case 'diff': arr.sort((a,b)=> (b.diff)-(a.diff)); break;
+        case 'longest': arr.sort((a,b)=> (b.longest)-(a.longest)); break;
+        case 'ratioDev': arr.sort((a,b)=> Math.abs((b.ratio||0)-( (pMin+pMax)/2 )) - Math.abs((a.ratio||0)-( (pMin+pMax)/2 )) ); break;
+        case 'mix': arr.sort((a,b)=> (b.cycRatio)-(a.cycRatio)); break;
+        default: break;
+      }
+      return arr;
+    }, [employees, C, daysLen, adminDays, pMin, pMax, mixMax, orderBy, data, cur.s, cur.e]);
+
+    return (
+      <Section title={`统计与对齐（${cur.s} ~ ${cur.e}）`} right={<div className="flex flex-wrap items-center gap-2 text-sm"><label>周期：</label><select className="border rounded px-2 py-1" value={statPeriod} onChange={e=>setStatPeriod(e.target.value)}><option value="y">年度</option><option value="q">季度</option><option value="m">月度</option><option value="r">当前选区</option></select><label className="ml-2">视图：</label><select className="border rounded px-2 py-1" value={statView} onChange={e=>setStatView(e.target.value)}><option value="daily">日期在岗分析</option><option value="person">人员班次统计</option><option value="rest">月度休息周期</option><option value="album">专辑审核</option></select>{statView==='person' && (<><label className="ml-2">排序：</label><select className="border rounded px-2 py-1" value={orderBy} onChange={e=>setOrderBy(e.target.value)}><option value="default">默认</option><option value="diff">差值</option><option value="longest">最长连班</option><option value="ratioDev">中/白偏差</option><option value="mix">混合比例</option></select></>)}{statView==='rest' && (<label className="ml-2 inline-flex items-center gap-1 text-xs text-gray-600"><input type="checkbox" className="rounded" checked={showRestCounts} onChange={e=> setShowRestCounts(e.target.checked)} />显示月度明细</label>)}</div>}>
+        {statView==='person' && (
+          <div className="mb-3 grid grid-cols-2 md:grid-cols-5 gap-2 text-sm">
+            <div className="rounded-xl border p-2 bg-gradient-to-br from-indigo-50 to-white"><div className="text-xs text-gray-500">平均白</div><div className="text-lg font-semibold text-indigo-700">{avg.白}</div></div>
+            <div className="rounded-xl border p-2 bg-gradient-to-br from-sky-50 to-white"><div className="text-xs text-gray-500">平均中1</div><div className="text-lg font-semibold text-sky-700">{avg.中1}</div></div>
+            <div className="rounded-xl border p-2 bg-gradient-to-br from-cyan-50 to-white"><div className="text-xs text-gray-500">平均中2</div><div className="text-lg font-semibold text-cyan-700">{avg.中2}</div></div>
+            <div className="rounded-xl border p-2 bg-gradient-to-br from-rose-50 to-white"><div className="text-xs text-gray-500">平均夜</div><div className="text-lg font-semibold text-rose-700">{avg.夜}</div></div>
+            <div className="rounded-xl border p-2 bg-gradient-to-br from-emerald-50 to-white"><div className="text-xs text-gray-500">平均总</div><div className="text-lg font-semibold text-emerald-700">{avg.总}</div></div>
+          </div>
+        )}
+
+        {['daily','person'].includes(statView) && (
+          <div className="mb-4 grid grid-cols-2 md:grid-cols-3 gap-2 text-sm">
+            <div className="rounded-xl border p-2 bg-gradient-to-br from-amber-50 to-white"><div className="text-xs text-gray-500">平均每天在岗</div><div className="text-lg font-semibold text-amber-700">{dailyAvg.总}</div></div>
+            <div className="rounded-xl border p-2 bg-gradient-to-br from-indigo-50 to-white"><div className="text-xs text-gray-500">平均每天白班</div><div className="text-lg font-semibold text-indigo-700">{dailyAvg.白}</div></div>
+            <div className="rounded-xl border p-2 bg-gradient-to-br from-sky-50 to-white"><div className="text-xs text-gray-500">平均每天中1</div><div className="text-lg font-semibold text-sky-700">{dailyAvg.中1}</div></div>
+          </div>
+        )}
+
+        {statView==='daily' && (
+          <>
+            <div className="mb-4 grid grid-cols-2 md:grid-cols-6 gap-2 text-sm">
+              <div className="rounded-xl border p-2 bg-indigo-50/60"><div className="text-xs text-gray-500">白（总人次）</div><div className="text-lg font-semibold text-indigo-700">{sumTotals.白}</div></div>
+              <div className="rounded-xl border p-2 bg-sky-50/60"><div className="text-xs text-gray-500">中1（总人次）</div><div className="text-lg font-semibold text-sky-700">{sumTotals.中1}</div></div>
+              <div className="rounded-xl border p-2 bg-cyan-50/60"><div className="text-xs text-gray-500">中2（总人次）</div><div className="text-lg font-semibold text-cyan-700">{sumTotals.中2}</div></div>
+              <div className="rounded-xl border p-2 bg-rose-50/60"><div className="text-xs text-gray-500">夜（总人次）</div><div className="text-lg font-semibold text-rose-700">{sumTotals.夜}</div></div>
+              <div className="rounded-xl border p-2 bg-emerald-50/60"><div className="text-xs text-gray-500">在岗（总人次）</div><div className="text-lg font-semibold text-emerald-700">{sumTotals.总}</div></div>
+              <div className="rounded-xl border p-2 bg-gray-50"><div className="text-xs text-gray-500">休（估算）</div><div className="text-lg font-semibold text-gray-800">{restTotal}</div></div>
+            </div>
+
+            <div className="overflow-auto rounded-xl border">
+              <table className="text-sm min-w-[780px] w-full">
+                <thead className="bg-gray-50">
+                  <tr className="text-gray-500">
+                    <th className="text-left py-2 px-3">日期</th>
+                    <th className="text-right py-2 px-3">在岗</th>
+                    <th className="text-left py-2 px-3 w-[320px]">构成（白 / 中1 / 中2 / 夜）</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {daySeries.map(s=>{
+                    const pW = s.total? Math.round(s.W/s.total*100) : 0;
+                    const pM = s.total? Math.round(s.M/s.total*100) : 0;
+                    const pM2= s.total? Math.round(s.N2/s.total*100) : 0;
+                    const pN = s.total? Math.round(s.N/s.total*100) : 0;
+                    return (
+                      <tr key={s.d} className="border-t hover:bg-gray-50">
+                        <td className="py-1.5 px-3">{s.d}</td>
+                        <td className="py-1.5 px-3 text-right">{s.total}</td>
+                        <td className="py-1.5 px-3">
+                          <div className="h-3 rounded-full bg-gray-100 overflow-hidden flex">
+                            <div style={{width:`${pW}%`, background: shiftColors['白']}} title={`白 ${s.W}`}></div>
+                            <div style={{width:`${pM}%`, background: shiftColors['中1']}} title={`中1 ${s.M}`}></div>
+                            <div style={{width:`${pM2}%`, background: shiftColors['中2']}} title={`中2 ${s.N2}`}></div>
+                            <div style={{width:`${pN}%`, background: shiftColors['夜']}} title={`夜 ${s.N}`}></div>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="mt-3 text-xs text-gray-600">高峰提示：中1最多 {peakMid.val<0?0:peakMid.val}（{peakMid.d}），白班最多 {peakWhite.val<0?0:peakWhite.val}（{peakWhite.d}）。</div>
+          </>
+        )}
+
+        {statView==='person' && (
+          <>
+            <div className="flex items-center gap-2 mb-3 mt-4 text-sm">
+              <label className="inline-flex items-center gap-2">行政班应上天数（当前周期）：<input type="number" className="w-24 border rounded px-2 py-1" value={adminDays} onChange={e=> setAdminDays(Number(e.target.value||0))}/></label>
+              <span className="text-gray-500">差值= 实际总天数 - 行政班应上天数（正=超出，负=不足）</span>
+            </div>
+            <div className="overflow-auto">
+              <table className="text-sm min-w-[1100px] w-full">
+                <thead>
+                  <tr className="text-gray-500">
+                    <th className="text-left">姓名</th>
+                    {['白','中1','中2','夜','总','休','差值','中/白','中/白状态','最长连班','混合周期','混合状态','建议'].map((h,i)=> <th key={i} className={`text-right pr-3 ${i===0?'text-left':''}`}>{h}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map(r=> (
+                    <tr key={r.e} className="border-t hover:bg-gray-50">
+                      <td className="py-1 text-left">{r.e}</td>
+                      {[r.W, r.M, r.N2, r.N, r.total, r.restDays, r.diff, r.ratioStr].map((v,idx)=> <td key={idx} className={`py-1 text-right pr-3 ${idx===6&&(v<0?'text-red-600':v>0?'text-emerald-600':'text-gray-700')}`}>{v}</td>)}
+                      <td className="py-1 text-right pr-3">{r.pass? <span className="badge bg-emerald-100 text-emerald-700">OK</span> : <span className="badge bg-rose-100 text-rose-700">OFF</span>}</td>
+                      <td className={`py-1 text-right pr-3 ${r.longest>6?'text-rose-600 font-medium':''}`}>{r.longest}</td>
+                      <td className={`py-1 text-right pr-3`}>{r.cycMix}/{r.cycTot}（{(r.cycRatio*100).toFixed(0)}%）</td>
+                      <td className="py-1 text-right pr-3">{r.mixOk? <span className="badge bg-emerald-100 text-emerald-700">OK</span> : <span className="badge bg-rose-100 text-rose-700">超限</span>}</td>
+                      <td className="py-1 text-right pr-3 text-gray-700">{(()=>{ if(adminDays>0){ if(r.diff>0) return `建议减 ${r.diff}`; if(r.diff<0) return `建议补 ${-r.diff}`; } return '—'; })()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+
+        {statView==='rest' && (
+          <>
+            <div className="mb-4">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-medium text-gray-700">休息周期平均人数（按月度主休类型）</h3>
+                <span className="text-xs text-gray-400">统计区间：{cur.s} ~ {cur.e}</span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+                {restPairAverages.map(item=> (
+                  <div key={item.pair} className="rounded-2xl border bg-gradient-to-br from-white to-indigo-50/70 p-3 text-center shadow-sm">
+                    <div className="text-xs text-gray-500">休{item.pair}</div>
+                    <div className="text-xl font-semibold text-indigo-600">{item.avg}<span className="text-sm text-gray-500 ml-1">人</span></div>
+                  </div>
+                ))}
+              </div>
+              <div className="text-xs text-gray-500 mt-2">说明：以上数值为各月主要休息组合对应的平均人数，便于判断休息偏好分布。</div>
+            </div>
+            <div className="overflow-auto rounded-2xl border">
+              <table className="min-w-[720px] w-full text-sm">
+                <thead className="bg-gray-50 text-gray-600">
+                  <tr>
+                    <th className="text-left py-2 px-3 w-36">人员</th>
+                    {monthSpans.map(span=> (
+                      <th key={span.key} className="text-center py-2 px-3">{span.label}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {restCycles.map(row=> (
+                    <tr key={row.emp} className="border-t hover:bg-indigo-50/20">
+                      <td className="py-2 px-3 font-medium text-gray-700">{row.emp}</td>
+                      {monthSpans.map(span=>{
+                        const info = row.months[span.key] || {};
+                        const pairs = Object.entries(info.counts||{}).sort((a,b)=> b[1]-a[1]);
+                        return (
+                          <td key={span.key} className="py-2 px-3 text-center">
+                            <div className="flex flex-col items-center gap-1">
+                              <span className={`text-base font-semibold ${info.bestPair? 'text-indigo-600':'text-gray-400'}`}>{info.display || (info.hasData? '—':'')}</span>
+                              {showRestCounts && (
+                                <div className="flex flex-wrap justify-center gap-1 text-[11px] text-gray-500 max-w-[160px]">
+                                  {pairs.length>0 ? (
+                                    pairs.map(([pair,count])=> (
+                                      <span key={pair} className="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700">休{pair}×{count}</span>
+                                    ))
+                                  ) : info.hasData ? (
+                                    <span className="text-gray-400">无完整休息周期</span>
+                                  ) : null}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {showRestCounts && restCycleTotals.length>0 && (
+              <div className="mt-4 rounded-2xl border bg-white overflow-hidden">
+                <div className="px-4 py-3 border-b bg-gray-50 text-sm font-medium text-gray-700 flex items-center justify-between"><span>主要休息周期次数汇总</span><span className="text-xs text-gray-400">统计区间共 {monthSpans.length} 个月</span></div>
+                <div className="overflow-auto">
+                  <table className="min-w-[680px] w-full text-sm">
+                    <thead className="bg-gray-50 text-gray-500">
+                      <tr>
+                        <th className="text-left py-2 px-3">人员</th>
+                        {REST_PAIRS.map(pair=> <th key={`tot-${pair}`} className="text-right py-2 px-3">休{pair}</th>)}
+                        <th className="text-right py-2 px-3">有排班月份</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {restCycleTotals.map(row=> (
+                        <tr key={`totrow-${row.emp}`} className="border-t hover:bg-indigo-50/20">
+                          <td className="py-1.5 px-3 text-gray-700">{row.emp}</td>
+                          {REST_PAIRS.map(pair=> <td key={`cell-${row.emp}-${pair}`} className="py-1.5 px-3 text-right">{row.totals[pair]}</td>)}
+                          <td className="py-1.5 px-3 text-right text-gray-600">{row.effective}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+        {statView==='album' && (
+          <>
+            <div className="mb-4 flex flex-wrap items-center gap-3 text-sm">
+              <span className="font-medium text-gray-700">专辑审核视图</span>
+              <div className="inline-flex rounded-full border border-indigo-100 bg-indigo-50/40 p-0.5">
+                <button onClick={()=>setAlbumStatMode('analysis')} className={`px-3 py-1 rounded-full text-xs font-medium transition ${albumStatMode==='analysis' ? 'bg-indigo-600 text-white shadow' : 'text-indigo-600 hover:bg-indigo-100'}`}>数据统计分析</button>
+                <button onClick={()=>setAlbumStatMode('history')} className={`px-3 py-1 rounded-full text-xs font-medium transition ${albumStatMode==='history' ? 'bg-indigo-600 text-white shadow' : 'text-indigo-600 hover:bg-indigo-100'}`}>历史排班表</button>
+              </div>
+              <span className="text-xs text-gray-400">基于专辑审核确认记录实时汇总</span>
+            </div>
+            {albumStatMode==='analysis' ? (
+              albumEntriesInRange.length===0 ? (
+                <div className="text-sm text-gray-500">当前统计周期内暂无已确认的专辑审核排班，可在专辑审核自动排班页点击“确认排班”后查看。</div>
+              ) : (
+                <>
+                  <div className="mb-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 text-sm">
+                    <div className="rounded-2xl border bg-gradient-to-br from-white to-indigo-50 p-3">
+                      <div className="text-xs text-gray-500">确认批次</div>
+                      <div className="text-lg font-semibold text-indigo-700">{albumSummary.batches}</div>
+                    </div>
+                    <div className="rounded-2xl border bg-gradient-to-br from-white to-emerald-50 p-3">
+                      <div className="text-xs text-gray-500">参与人员数</div>
+                      <div className="text-lg font-semibold text-emerald-700">{albumSummary.employeeCount}</div>
+                    </div>
+                    <div className="rounded-2xl border bg-gradient-to-br from-white to-sky-50 p-3">
+                      <div className="text-xs text-gray-500">累计白班天数</div>
+                      <div className="text-lg font-semibold text-sky-600">{albumSummary.whiteDays}</div>
+                    </div>
+                    <div className="rounded-2xl border bg-gradient-to-br from-white to-amber-50 p-3">
+                      <div className="text-xs text-gray-500">累计中班天数</div>
+                      <div className="text-lg font-semibold text-amber-600">{albumSummary.midDays}</div>
+                    </div>
+                    <div className="rounded-2xl border bg-gradient-to-br from-white to-rose-50 p-3">
+                      <div className="text-xs text-gray-500">单批平均总时长</div>
+                      <div className="text-lg font-semibold text-rose-600">{albumSummary.avgTotalHoursPerBatch.toFixed(2)}<span className="text-sm text-gray-500 ml-1">小时</span></div>
+                    </div>
+                    <div className="rounded-2xl border bg-gradient-to-br from-white to-slate-50 p-3">
+                      <div className="text-xs text-gray-500">人均审核时长</div>
+                      <div className="text-lg font-semibold text-slate-700">{albumSummary.avgHoursPerEmployee.toFixed(2)}<span className="text-sm text-gray-500 ml-1">小时</span></div>
+                    </div>
+                  </div>
+                  <div className="mb-3 text-xs text-gray-500">平均每批白班 {albumSummary.avgWhiteHoursPerBatch.toFixed(2)} 小时，中班 {albumSummary.avgMidHoursPerBatch.toFixed(2)} 小时。</div>
+                  <div className="overflow-auto rounded-2xl border">
+                    <table className="min-w-[680px] w-full text-sm">
+                      <thead className="bg-gray-50 text-gray-500">
+                        <tr>
+                          <th className="text-left py-2 px-3">人员</th>
+                          <th className="text-right py-2 px-3">白班天数</th>
+                          <th className="text-right py-2 px-3">白班时长</th>
+                          <th className="text-right py-2 px-3">中班天数</th>
+                          <th className="text-right py-2 px-3">中班时长</th>
+                          <th className="text-right py-2 px-3">总时长</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {albumRows.map(row=> (
+                          <tr key={`album-analysis-${row.emp}`} className="border-t hover:bg-indigo-50/20">
+                            <td className="py-1.5 px-3 text-gray-700">{row.emp}</td>
+                            <td className="py-1.5 px-3 text-right">{row.whiteDays}</td>
+                            <td className="py-1.5 px-3 text-right">{row.whiteHours.toFixed(2)}</td>
+                            <td className="py-1.5 px-3 text-right">{row.midDays}</td>
+                            <td className="py-1.5 px-3 text-right">{row.midHours.toFixed(2)}</td>
+                            <td className="py-1.5 px-3 text-right font-medium text-indigo-700">{row.totalHours.toFixed(2)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )
+            ) : (
+              albumHistoryForView.length===0 ? (
+                <div className="text-sm text-gray-500">当前统计周期内暂无历史排班，可在专辑审核自动排班页确认后查看。</div>
+              ) : (
+                <div className="space-y-4">
+                  {albumHistoryForView.map(entry=> {
+                    const days = Object.keys(entry.assignments||{}).filter(day=> day>=cur.s && day<=cur.e).sort();
+                    const savedAt = entry.savedAt ? new Date(entry.savedAt).toLocaleString() : '—';
+                    const totals = entry.totals || {};
+                    const coverage = entry.coverage || {};
+                    return (
+                      <div key={entry.id} className="rounded-2xl border bg-white overflow-hidden shadow-sm">
+                        <div className="px-4 py-3 border-b bg-gray-50 text-sm font-medium text-gray-700 flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex flex-col sm:flex-row sm:items-center sm:gap-3">
+                            <span>{entry.range?.start} ~ {entry.range?.end}</span>
+                            <span className="text-xs text-gray-400">保存于 {savedAt}</span>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-gray-600">
+                            <span className="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700">白班 {totals.whiteDays||0} 天 / {(Number(totals.whiteHours)||0).toFixed(2)} 小时</span>
+                            <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">中班 {totals.midDays||0} 天 / {(Number(totals.midHours)||0).toFixed(2)} 小时</span>
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">总时长 {(Number(totals.totalHours)||0).toFixed(2)} 小时</span>
+                            <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">时长差值 {(Number(entry.diff)||0).toFixed(2)} 小时</span>
+                            <span className="px-2 py-0.5 rounded-full bg-sky-50 text-sky-700">覆盖 {coverage.totalDays||0} 天</span>
+                          </div>
+                        </div>
+                        {days.length===0 ? (
+                          <div className="p-4 text-xs text-gray-500">当前统计周期内与该记录无重叠日期。</div>
+                        ) : (
+                          <div className="overflow-auto">
+                            <table className="min-w-[600px] w-full text-sm">
+                              <thead className="bg-gray-50 text-gray-500">
+                                <tr>
+                                  <th className="text-left py-2 px-3">日期</th>
+                                  <th className="text-left py-2 px-3">星期</th>
+                                  <th className="text-left py-2 px-3">白班审核</th>
+                                  <th className="text-left py-2 px-3">中班审核</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {days.map(day=>{
+                                  const info = entry.assignments?.[day] || {};
+                                  const wk = WN[new Date(day).getDay()];
+                                  return (
+                                    <tr key={`${entry.id}-${day}`} className="border-t hover:bg-indigo-50/20">
+                                      <td className="py-1.5 px-3 font-medium text-gray-700">{day}</td>
+                                      <td className="py-1.5 px-3 text-gray-500">周{wk}</td>
+                                      <td className="py-1.5 px-3"><span className={`inline-block px-2 py-0.5 rounded-full text-xs ${info.white ? 'bg-white border border-gray-200 text-gray-700' : 'bg-rose-50 border border-rose-200 text-rose-600'}`}>{info.white || '未分配'}</span></td>
+                                      <td className="py-1.5 px-3"><span className={`inline-block px-2 py-0.5 rounded-full text-xs ${info.mid ? 'bg-white border border-gray-200 text-gray-700' : 'bg-rose-50 border border-rose-200 text-rose-600'}`}>{info.mid || '未分配'}</span></td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )
+            )}
+          </>
+        )}
+      </Section>
+    );
+  })();
+
+  const ViewHistory = (
+    <HistorySection
+      teamDisplayName={teamDisplayName}
+      versions={versions}
+      versionsLoading={versionsLoading}
+      editingLocked={editingLocked}
+      versionDeletingId={versionDeletingId}
+      onRefresh={loadVersions}
+      onLoadVersion={loadVersionById}
+      onDeleteVersion={deleteVersionById}
+    />
+  );
+  const scheduleYearLabel = (()=>{
+    const rawYear = (start || '').slice(0,4);
+    return /^\d{4}$/.test(rawYear) ? rawYear : String(today.getFullYear());
+  })();
+  const handleNoteChange = (value) => setNote(value);
+  const handleShiftColorChange = (shift, color) => {
+    setShiftColors((prev) => ({ ...prev, [shift]: color }));
+  };
+  const resetShiftColors = () => {
+    setShiftColors({ ...defaultShiftColors });
+  };
+  const updateAlert = (key, updater) => {
+    setStaffingAlerts((prev) => {
+      const next = normalizeStaffingAlerts(prev);
+      next[key] = { ...next[key], ...updater };
+      return next;
+    });
+  };
+  const handleAlertThresholdChange = (key, value) => updateAlert(key, { threshold: value });
+  const handleAlertLowColorChange = (key, value) => updateAlert(key, { lowColor: value });
+  const handleAlertHighColorChange = (key, value) => updateAlert(key, { highColor: value });
+  const resetStaffingAlerts = () => setStaffingAlerts(normalizeStaffingAlerts());
+  const ViewSettings = (
+    <SettingsSection
+      note={note}
+      editingLocked={editingLocked}
+      onNoteChange={handleNoteChange}
+      onSave={saveToServer}
+      onExport={exportExcel}
+      yearlyOptimize={yearlyOptimize}
+      onToggleYearlyOptimize={setYearlyOptimize}
+      scheduleYearLabel={scheduleYearLabel}
+      shiftColors={shiftColors}
+      onChangeShiftColor={handleShiftColorChange}
+      onResetShiftColors={resetShiftColors}
+      staffingAlerts={staffingAlerts}
+      onAlertThresholdChange={handleAlertThresholdChange}
+      onAlertLowColorChange={handleAlertLowColorChange}
+      onAlertHighColorChange={handleAlertHighColorChange}
+      onResetAlerts={resetStaffingAlerts}
+    />
+  );
+
+  const extraAccounts = orgConfig.accounts.filter(acc=> acc.username!=='admin');
+  const ViewRoles = canManageRoles ? (
+    <>
+      <Section title="团队管理" right={<PillBtn onClick={addTeam} color="sky" disabled={editingLocked}>新增团队</PillBtn>}>
+        {teamsList.length===0 ? (
+          <p className="text-sm text-gray-500">暂未创建团队，请点击右上角按钮新增。</p>
+        ) : (
+          <div className="space-y-3">
+            {teamsList.map(t=> (
+              <div key={t.id} className="border rounded-2xl p-4 bg-white shadow-sm">
+                <div className="flex flex-wrap items-end gap-3 text-sm">
+                  <label className="flex flex-col text-sm text-gray-600">
+                    <span className="mb-1">团队名称</span>
+                    <input className={`border rounded px-3 py-1.5 ${editingLocked?'bg-gray-100':''}`} value={t.name}
+                      onChange={e=> updateTeamField(t.id, 'name', e.target.value)} disabled={editingLocked} />
+                  </label>
+                  <div className="text-xs text-gray-500">ID：{t.id}</div>
+                  <label className="flex-1 flex flex-col text-sm text-gray-600 min-w-[200px]">
+                    <span className="mb-1">备注</span>
+                    <input className={`border rounded px-3 py-1.5 ${editingLocked?'bg-gray-100':''}`} value={t.remark||''}
+                      onChange={e=> updateTeamField(t.id, 'remark', e.target.value)} disabled={editingLocked} />
+                  </label>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-4 text-sm">
+                  <label className={`inline-flex items-center gap-2 ${editingLocked?'opacity-60':''}`}>
+                    <input type="checkbox" checked={t.features?.albumScheduler !== false} disabled={editingLocked}
+                      onChange={e=> updateTeamFeature(t.id, 'albumScheduler', e.target.checked)} /> 启用专辑审核自动排班
+                  </label>
+                </div>
+                {teamsList.length>1 && (
+                  <div className="mt-3 text-right">
+                    <button onClick={()=> removeTeam(t.id)} className={`text-sm text-rose-600 ${editingLocked?'opacity-50 cursor-not-allowed':'hover:underline'}`} disabled={editingLocked}>删除团队</button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </Section>
+      <Section title="账号与权限" right={<PillBtn onClick={addAccount} color="emerald" disabled={editingLocked}>新增账号</PillBtn>}>
+        <div className="space-y-4 text-sm">
+          <div className="rounded-xl border border-dashed border-indigo-200 bg-indigo-50/40 p-4 text-xs text-indigo-700">
+            超级管理员 <span className="font-medium">admin</span> 拥有全部权限，可在此创建访客或管理者账号，并分配可访问的团队与菜单权限。
+          </div>
+          {extraAccounts.length===0 ? (
+            <p className="text-sm text-gray-500">暂未创建其他账号。</p>
+          ) : (
+            extraAccounts.map(acc=>{
+              const hasAll = acc.teamAccess && acc.teamAccess.includes('*');
+              const passwordDraft = accountPasswordDrafts[acc.username] || '';
+              return (
+                <div key={acc.username} className="border rounded-2xl p-4 bg-white shadow-sm space-y-3">
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                    <label className="flex flex-col text-gray-600 text-sm">
+                      <span className="mb-1">账号</span>
+                      <input className={`border rounded px-3 py-1.5 ${editingLocked?'bg-gray-100':''}`} value={acc.username}
+                        onChange={e=> setAccountUsername(acc.username, e.target.value)} disabled={editingLocked} />
+                    </label>
+                    <label className="flex flex-col text-gray-600 text-sm">
+                      <span className="mb-1">显示名称</span>
+                      <input className={`border rounded px-3 py-1.5 ${editingLocked?'bg-gray-100':''}`} value={acc.displayName||''}
+                        onChange={e=> setAccountDisplayName(acc.username, e.target.value)} disabled={editingLocked} />
+                    </label>
+                    <label className="flex flex-col text-gray-600 text-sm">
+                      <span className="mb-1">角色</span>
+                      <select className={`border rounded px-3 py-1.5 ${editingLocked?'bg-gray-100':''}`} value={acc.role||'guest'}
+                        onChange={e=> setAccountRole(acc.username, e.target.value)} disabled={editingLocked}>
+                        <option value="guest">访客（只读）</option>
+                        <option value="manager">管理者</option>
+                      </select>
+                    </label>
+                  </div>
+                  <div className="flex flex-wrap items-end gap-2">
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">登录密码</label>
+                      <input type="password" className={`border rounded px-3 py-1.5 ${editingLocked?'bg-gray-100':''}`} value={passwordDraft}
+                        onChange={e=> updateAccountPasswordDraft(acc.username, e.target.value)} placeholder="留空表示清空" disabled={editingLocked} />
+                    </div>
+                    <PillBtn onClick={()=> setAccountPassword(acc.username)} color="indigo" disabled={editingLocked}>更新密码</PillBtn>
+                    <button onClick={()=> removeAccount(acc.username)} className={`text-sm text-rose-600 ${editingLocked?'opacity-50 cursor-not-allowed':'hover:underline'}`} disabled={editingLocked}>删除账号</button>
+                  </div>
+                  <div>
+                    <div className="text-xs text-gray-500 mb-1">可切换团队</div>
+                    <div className="flex flex-wrap gap-3">
+                      <label className={`inline-flex items-center gap-2 ${editingLocked?'opacity-60':''}`}>
+                        <input type="checkbox" checked={hasAll} disabled={editingLocked}
+                          onChange={e=> setAccountAllTeams(acc.username, e.target.checked)} /> 全部团队
+                      </label>
+                      {teamsList.map(teamItem=> (
+                        <label key={teamItem.id} className={`inline-flex items-center gap-2 ${hasAll?'opacity-60':''}`}>
+                          <input type="checkbox" disabled={editingLocked || hasAll} checked={hasAll || (acc.teamAccess||[]).includes(teamItem.id)}
+                            onChange={()=> toggleAccountTeam(acc.username, teamItem.id)} /> {teamItem.name}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-gray-500 mb-1">菜单权限</div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                      {MENU_KEYS.filter(key=> key!=='roles').map(key=>{
+                        const conf = (acc.menus && acc.menus[key]) ? acc.menus[key] : defaultMenuPerms()[key];
+                        const visible = conf.visible !== false;
+                        const editable = conf.editable !== false;
+                        return (
+                          <div key={key} className="flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-2">
+                            <span className="flex-1 text-sm text-gray-700">{menuLabels[key]}</span>
+                            <label className={`inline-flex items-center gap-1 text-xs ${editingLocked?'opacity-60':''}`}>
+                              <input type="checkbox" checked={visible} disabled={editingLocked}
+                                onChange={e=> updateAccountMenu(acc.username, key, 'visible', e.target.checked)} /> 可见
+                            </label>
+                            <label className={`inline-flex items-center gap-1 text-xs ${editingLocked||!visible?'opacity-60':''}`}>
+                              <input type="checkbox" checked={editable && visible} disabled={editingLocked || !visible}
+                                onChange={e=> updateAccountMenu(acc.username, key, 'editable', e.target.checked)} /> 可编辑
+                            </label>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </Section>
+    </>
+  ) : (
+    <Section title="角色设置">
+      <p className="text-sm text-gray-500">仅超级管理员可访问此页面。</p>
+    </Section>
+  );
+
+  const Topbar = (
+    <div className="sticky top-0 z-30 bg-gradient-to-b from-white/90 to-white/60 backdrop-blur border-b">
+      <div className="max-w-[1400px] mx-auto px-4 py-3 flex items-center gap-3">
+        <h1 className="text-xl font-bold text-indigo-600">排班助手（测试版）</h1>
+        <div className="flex-1"></div>
+        <div className="flex lg:hidden items-center gap-2 text-sm mr-2">
+          <TeamSwitcher teams={accessibleTeams} value={team} onChange={setTeam} disabled={prog.running} canManage={canManageRoles} onManage={()=> setTab('roles')} />
+        </div>
+        <div className="hidden lg:flex items-center gap-2 text-sm">
+          <TeamSwitcher teams={accessibleTeams} value={team} onChange={setTeam} disabled={prog.running} canManage={canManageRoles} onManage={()=> setTab('roles')} />
+          <input type="date" className={`border rounded px-3 py-1.5 ${editingLocked?'bg-gray-100':''}`} value={start} onChange={e=>setStart(e.target.value)} disabled={editingLocked} />
+          <span className="text-gray-400">—</span>
+          <input type="date" className={`border rounded px-3 py-1.5 ${editingLocked?'bg-gray-100':''}`} value={end} onChange={e=>setEnd(e.target.value)} disabled={editingLocked} />
+        </div>
+        <div className="flex items-center gap-2">
+          <PillBtn onClick={exportExcel} color="sky" disabled={editingLocked}>导出</PillBtn>
+          <button onClick={()=> clearRange('empty')} className={`px-3 py-1.5 rounded-full text-sm ${editingLocked?'bg-gray-200 cursor-not-allowed':'bg-amber-100 hover:bg-amber-200'}`} disabled={editingLocked}>清空当前范围</button>
+          {user ? (<button onClick={async()=>{ await apiPost('/logout',{}).catch(()=>{}); setUser(null); }} className={`px-3 py-1.5 rounded-full text-sm ${editingLocked?'bg-gray-200 cursor-not-allowed':'bg-gray-200 hover:bg-gray-300'}`} disabled={editingLocked}>退出</button>) : (<span className="text-xs text-gray-500">未登录</span>)}
+        </div>
+      </div>
+      {Object.keys(nightIssues).length>0 && (
+        <div className="max-w-[1400px] mx-auto px-4 pb-2 text-sm text-red-600">夜班窗口缺：{Object.entries(nightIssues).slice(0,10).map(([k,v])=>`${k}${v==='缺夜&中2'?'(缺夜&中2)':v==='缺夜'?'(缺夜)':'(缺中2)'}`).join('，')}{Object.keys(nightIssues).length>10?' …':''}</div>
+      )}
+    </div>
+  );
+
+  const content = ({ grid: ViewGrid, batch: ViewBatch, album: ViewAlbum, users: ViewEmployees, stats: ViewStats, history: ViewHistory, settings: ViewSettings, roles: ViewRoles }[tab]) || ViewBatch;
+
+  return (
+    <div className="min-h-screen">
+      {Topbar}
+      <div className="max-w-[1400px] mx-auto px-4 py-6">
+        <SideDock tab={tab} setTab={setTab} menuPerms={menuPerms}/>
+        <main className="animate-fade-in">{content}<footer className="text-center text-xs text-gray-400 py-6">© 排班助手（测试版） v2.3</footer></main>
+      </div>
+
+      {toast && (
+        <div className="fixed top-4 right-4 z-50">
+          <div className={`animate-fade-in px-4 py-3 rounded-xl shadow-lg text-sm text-white ${toast.type==='success' ? 'bg-emerald-500' : toast.type==='error' ? 'bg-rose-500' : 'bg-gray-800'}`}>
+            {toast.message}
+          </div>
+        </div>
+      )}
+      {prog.running && (
+        <div className="floating-progress">
+          <div className="fp-card rounded-2xl p-4 animate-fade-in">
+            <div className="flex items-center justify-between text-sm font-medium text-indigo-700"><span>排班执行中</span><span>{Math.round(prog.done/prog.total*100)}%</span></div>
+            <div className="mt-2 h-2 rounded-full bg-white/60 overflow-hidden"><div className="h-2 bg-indigo-500 transition-all" style={{width: `${Math.round(prog.done/prog.total*100)}%`}}></div></div>
+            <div className="mt-2 text-xs text-gray-600">{prog.stage}</div>
+            <div className="mt-2 logbox p-2 text-[12px] text-gray-700">
+              {logs.map((l,i)=> <div key={i} className="leading-5">{l}</div>)}
+              <div ref={logEndRef}></div>
+            </div>
+          </div>
+        </div>
+      )}
+      {!user && <LoginModal onSuccess={setUser} accounts={orgConfig.accounts} />}
+    </div>
+  );
+}
+
+;(function selfTests(){
+  try{
+    const list = enumerateDates('2025-10-01','2025-10-03');
+    console.assert(list.length===3 && list[0]==='2025-10-01' && list[2]==='2025-10-03', 'enumerateDates 测试未通过');
+
+    const base = {}; enumerateDates('2025-10-06','2025-10-19').forEach(d=> base[d] = { '甲':'', '乙':'', '丙':'' });
+    const rest = { '甲':'56', '乙':'56', '丙':'56' };
+    let d0 = buildWhiteFiveTwo({ employees:['甲','乙','丙'], data:base, start:'2025-10-06', end:'2025-10-19', restPrefs:rest });
+    let alt = applyAlternateByCycle({ employees:['甲','乙','丙'], data:d0, start:'2025-10-06', end:'2025-10-19' }, 0.5);
+    let dayClamp = clampDailyByRange({ employees:['甲','乙','丙'], data:alt, start:'2025-10-06', end:'2025-10-19', rMin:0.3, rMax:0.7, maxRounds:80, mixMaxRatio:0.5 });
+    let perClamp = clampPersonByRange({ employees:['甲','乙','丙'], data:dayClamp, start:'2025-10-06', end:'2025-10-19', pMin:0.3, pMax:0.7, maxRounds:100, mixMaxRatio:0.5 });
+    let fixed = repairNoMidToWhite({ data: perClamp, employees:['甲','乙','丙'], start:'2025-10-06', end:'2025-10-19' });
+
+    let ok=true; const ds = enumerateDates('2025-10-06','2025-10-19');
+    for(let i=0;i<ds.length-1;i++){ ['甲','乙','丙'].forEach((nm)=>{ const a=fixed[ds[i]]?.[nm]; const b=fixed[ds[i+1]]?.[nm]; if(a==='中1' && b==='白'){ ok=false; } }); }
+    console.assert(ok, '出现了中1→白相邻，违例');
+
+    console.log('%c自检通过','color:green');
+  }catch(err){ globalErr('自检失败：' + (err && err.message || err)); console.error(err); }
+})();
+const mountNode = document.getElementById('root');
+if(mountNode){
+  try {
+    const root = ReactDOM.createRoot(mountNode);
+    root.render(<App/>);
+  } catch (err) {
+    globalErr('运行错误：' + (err && err.message || err));
+    console.error(err);
+  }
+}
+  
