@@ -175,14 +175,19 @@
 - 新建 `app/core/Progress.php`，将进度日志的读取/写入逻辑与路径解析集中管理，配套中文注释说明调用方式。
 - `app/api/schedule.php`、`app/api/progress.php` 引入新模块以复用日志能力，`Utils.php` 仅保留数据库与通用 JSON/HTTP 工具。
 
+## 2025-10-14 第 19 步
+- 拆分请求解析与 JSON 响应工具，新增 `app/core/Http.php` 专职维护 `json_input`、`send_json`、`send_error` 等 HTTP 辅助函数。
+- `app/bootstrap.php` 统一加载新模块，API 层无需重复引用即可复用标准化的请求/响应流程。
+- `app/core/Utils.php` 精简为数据库、日期与通用算法工具，明确模块边界，后续可继续拆分缓存/随机数等能力。
+
 ### 拆分总体进度速览
 - **后端接口**：`schedule.php`、`versions.php`、`auth.php`、`org_config.php`、`progress.php` 均已独立，下一步评估导出/统计专用接口及鉴权强化。
 - **核心算法层**：`Scheduler.php`、`Rules.php`、`DTO.php`、`Utils.php` 已抽离，新建的 `Repository.php` 统一管理排班版本数据访问，`Storage.php`/`Progress.php` 拆分了日志与存储目录职责，后续考虑拆分日志/随机种子为独立服务模块。
 - **前端静态资源**：`state.js` 现负责常量、校验与状态 Hook；`ui.js` 覆盖所有 React 视图；`api.js` 管理请求封装；`main.js` 专注于业务流程与组件拼装。
 - **配置与存储**：`config/app.php`、`storage/` 结构稳定，进度日志已落地至 JSONL，仍需完善导出/备份策略。
-- **完成度**：约 88%，后端与前端主体拆分完成，后续聚焦日志可视化、统计面板与权限策略细化。
+- **完成度**：约 90%，后端与前端主体拆分完成，后续聚焦日志可视化、统计面板与权限策略细化。
 
-### 现有程序结构与职责（第 18 步更新）
+### 现有程序结构与职责（第 19 步更新）
 
 | 文件 | 核心作用 | 备注/注释 |
 | --- | --- | --- |
@@ -194,7 +199,8 @@
 | `app/api/progress.php` | 调度进度接口 | 读取/追加 `storage/logs/progress.jsonl` |
 | `app/api/auth.php` | 登录占位接口 | 维持前端登录流程所需的固定响应 |
 | `app/api/org_config.php` | 组织配置接口 | 负责组织配置的获取与持久化 |
-| `app/core/Utils.php` | 核心工具集 | 封装数据库、JSON 处理、HTTP 响应等共用函数 |
+| `app/core/Utils.php` | 核心工具集 | 提供 SQLite 连接、日期处理等通用能力 |
+| `app/core/Http.php` | HTTP 工具模块 | 解析 JSON 请求体，统一 JSON 成功/错误响应 |
 | `app/core/Storage.php` | 存储目录辅助 | 解析数据库同级目录并自动创建 logs/exports 等路径 |
 | `app/core/Progress.php` | 进度日志工具 | 负责进度 JSONL 的读取与写入 |
 | `app/core/Rules.php` | 业务规则模块 | 统一团队、成员、日期等数据校验与清洗 |

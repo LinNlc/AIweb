@@ -37,5 +37,6 @@ if (!defined('DB_FILE')) {
 }
 
 require_once __DIR__ . '/core/Utils.php';
+require_once __DIR__ . '/core/Http.php';
 
 return $config;

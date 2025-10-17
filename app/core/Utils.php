@@ -57,35 +57,6 @@ function db(): PDO {
 }
 
 /**
- * 解析并返回 JSON 请求体。
- */
-function json_input(): array {
-    $raw = file_get_contents('php://input');
-    if (!$raw) {
-        return [];
-    }
-    $arr = json_decode($raw, true);
-    return is_array($arr) ? $arr : [];
-}
-
-/**
- * 以 JSON 格式输出响应并终止脚本。
- */
-function send_json($data, int $status = 200): void {
-    http_response_code($status);
-    header('Content-Type: application/json; charset=utf-8');
-    echo json_encode($data, JSON_UNESCAPED_UNICODE);
-    exit;
-}
-
-/**
- * 以标准错误格式返回 JSON。
- */
-function send_error(string $message, int $status = 400, array $extra = []): void {
-    send_json(['message' => $message] + $extra, $status);
-}
-
-/**
  * 返回两个日期（含端点）之间的全部 YYYY-MM-DD 列表。
  */
 function ymd_range(string $start, string $end): array {
