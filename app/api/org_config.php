@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/../core/OrgConfig.php';
+
 /**
  * 处理组织配置读取与保存相关的 API 路由。
  *
@@ -31,22 +33,8 @@ function handle_org_config_request(string $method, string $path): bool
  */
 function org_config_fetch(): void
 {
-    $pdo = db();
-    $stmt = $pdo->query('SELECT payload, updated_at FROM org_config WHERE id = 1 LIMIT 1');
-    $row = $stmt->fetch();
-
-    $payload = [];
-    if ($row && isset($row['payload'])) {
-        $decoded = decode_json_assoc($row['payload']);
-        if ($decoded) {
-            $payload = $decoded;
-        }
-    }
-
-    send_json([
-        'config' => $payload,
-        'updated_at' => $row['updated_at'] ?? null,
-    ]);
+    $result = load_org_config();
+    send_json($result);
 }
 
 /**
@@ -56,29 +44,20 @@ function org_config_fetch(): void
 function org_config_save(): void
 {
     $in = json_input();
-    $config = $in['config'] ?? [];
 
-    if (is_object($config)) {
-        $config = json_decode(json_encode($config, JSON_UNESCAPED_UNICODE), true);
+    try {
+        $config = normalize_org_config_payload($in['config'] ?? []);
+    } catch (InvalidArgumentException $e) {
+        send_error($e->getMessage(), 400);
+        return;
     }
 
-    if (!is_array($config)) {
-        send_error('配置格式错误', 400);
+    try {
+        save_org_config($config);
+    } catch (RuntimeException $e) {
+        send_error($e->getMessage(), 500);
+        return;
     }
-
-    $json = json_encode($config, JSON_UNESCAPED_UNICODE);
-    if ($json === false) {
-        $json = json_encode($config, JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR);
-    }
-    if ($json === false) {
-        send_error('配置保存失败', 500);
-    }
-
-    $pdo = db();
-    $stmt = $pdo->prepare(
-        "INSERT INTO org_config(id, payload, updated_at)\n         VALUES(1, ?, datetime('now','localtime'))\n         ON CONFLICT(id) DO UPDATE SET payload=excluded.payload, updated_at=excluded.updated_at"
-    );
-    $stmt->execute([$json]);
 
     send_json(['ok' => true]);
 }

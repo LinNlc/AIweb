@@ -180,14 +180,19 @@
 - `app/bootstrap.php` 统一加载新模块，API 层无需重复引用即可复用标准化的请求/响应流程。
 - `app/core/Utils.php` 精简为数据库、日期与通用算法工具，明确模块边界，后续可继续拆分缓存/随机数等能力。
 
+## 2025-10-14 第 20 步
+- 新增 `app/core/OrgConfig.php`，集中组织配置的输入规范化、JSON 编解码与数据库写入逻辑，供 API 与后续 CLI 工具复用。
+- `app/api/org_config.php` 改为委托核心模块处理数据，接口层仅负责路由与 HTTP 响应，异常信息统一转换为 JSON 错误。
+- 更新进度文档的完成度、目录结构说明与文件职责表，使组织配置模块的职责边界更加清晰。
+
 ### 拆分总体进度速览
 - **后端接口**：`schedule.php`、`versions.php`、`auth.php`、`org_config.php`、`progress.php` 均已独立，下一步评估导出/统计专用接口及鉴权强化。
-- **核心算法层**：`Scheduler.php`、`Rules.php`、`DTO.php`、`Utils.php` 已抽离，新建的 `Repository.php` 统一管理排班版本数据访问，`Storage.php`/`Progress.php` 拆分了日志与存储目录职责，后续考虑拆分日志/随机种子为独立服务模块。
+- **核心算法层**：`Scheduler.php`、`Rules.php`、`DTO.php`、`Utils.php` 已抽离，`Repository.php` 统一管理排班版本数据访问，新增的 `OrgConfig.php` 与 `Storage.php`/`Progress.php` 划分了组织配置与日志存储职责。
 - **前端静态资源**：`state.js` 现负责常量、校验与状态 Hook；`ui.js` 覆盖所有 React 视图；`api.js` 管理请求封装；`main.js` 专注于业务流程与组件拼装。
 - **配置与存储**：`config/app.php`、`storage/` 结构稳定，进度日志已落地至 JSONL，仍需完善导出/备份策略。
-- **完成度**：约 90%，后端与前端主体拆分完成，后续聚焦日志可视化、统计面板与权限策略细化。
+- **完成度**：约 92%，后端与前端主体拆分完成，后续聚焦日志可视化、统计面板与权限策略细化。
 
-### 现有程序结构与职责（第 19 步更新）
+### 现有程序结构与职责（第 20 步更新）
 
 | 文件 | 核心作用 | 备注/注释 |
 | --- | --- | --- |
@@ -200,6 +205,7 @@
 | `app/api/auth.php` | 登录占位接口 | 维持前端登录流程所需的固定响应 |
 | `app/api/org_config.php` | 组织配置接口 | 负责组织配置的获取与持久化 |
 | `app/core/Utils.php` | 核心工具集 | 提供 SQLite 连接、日期处理等通用能力 |
+| `app/core/OrgConfig.php` | 组织配置核心模块 | 规范配置载荷并负责 JSON 编解码与数据库写入 |
 | `app/core/Http.php` | HTTP 工具模块 | 解析 JSON 请求体，统一 JSON 成功/错误响应 |
 | `app/core/Storage.php` | 存储目录辅助 | 解析数据库同级目录并自动创建 logs/exports 等路径 |
 | `app/core/Progress.php` | 进度日志工具 | 负责进度 JSONL 的读取与写入 |
