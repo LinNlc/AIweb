@@ -2,54 +2,18 @@
 declare(strict_types=1);
 
 /**
- * 排班助手 后端（无登录版 / PHP + SQLite）
- * 路径：/api/index.php
+ * 排班助手 前端入口（无登录版 / PHP + SQLite）
+ * 路径：/index.php
  */
 
-require __DIR__ . '/app/bootstrap.php';
-require __DIR__ . '/app/api/schedule.php';
-require __DIR__ . '/app/api/versions.php';
-require __DIR__ . '/app/api/progress.php';
-require __DIR__ . '/app/api/auth.php';
-require __DIR__ . '/app/api/org_config.php';
+$indexFile = __DIR__ . '/app/public/index.html';
 
-// ===== 路由 =====
-$path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-$method = $_SERVER['REQUEST_METHOD'];
-$path = preg_replace('#^/api#', '', $path) ?: '/';
-$servingIndex = ($method === 'GET') && ($path === '/' || $path === '/index.html');
-if ($servingIndex) {
-  $indexFile = __DIR__ . '/app/public/index.html';
-  if (is_file($indexFile)) {
-    header('Content-Type: text/html; charset=utf-8');
-    readfile($indexFile);
-    exit;
-  }
+if (!is_file($indexFile)) {
   http_response_code(500);
   header('Content-Type: text/plain; charset=utf-8');
   echo 'index.html 缺失';
   exit;
 }
-if ($method === 'OPTIONS') { http_response_code(204); exit; }
 
-if (handle_schedule_request($method, $path)) {
-  exit;
-}
-
-if (handle_versions_request($method, $path)) {
-  exit;
-}
-
-if (handle_progress_request($method, $path)) {
-  exit;
-}
-
-if (handle_auth_request($method, $path)) {
-  exit;
-}
-
-if (handle_org_config_request($method, $path)) {
-  exit;
-}
-
-send_error('Not Found', 404);
+header('Content-Type: text/html; charset=utf-8');
+readfile($indexFile);
