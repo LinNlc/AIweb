@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../core/Rules.php';
 require_once __DIR__ . '/../core/Utils.php';
+require_once __DIR__ . '/../core/Progress.php';
 
 /**
  * 进度日志 API：提供进度拉取与追加接口，供前端展示排班任务日志。

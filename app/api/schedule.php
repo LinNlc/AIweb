@@ -5,6 +5,7 @@ require_once __DIR__ . '/../core/Scheduler.php';
 require_once __DIR__ . '/../core/DTO.php';
 require_once __DIR__ . '/../core/Rules.php';
 require_once __DIR__ . '/../core/Repository.php';
+require_once __DIR__ . '/../core/Progress.php';
 
 /**
  * 处理排班相关的 API 路由。
