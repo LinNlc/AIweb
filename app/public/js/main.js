@@ -17,6 +17,8 @@ const {
   ScheduleGridSection,
   HistorySection,
   SettingsSection,
+  AlbumSection,
+  EmployeesSection,
 } = window.AppUI || {};
 const { API_BASE = '/api', apiGet, apiPost } = window.AppAPI || {};
 const AppState = window.AppState || {};
@@ -855,42 +857,6 @@ function App(){
     />
   );
 
-  function AlbumEmployeeChecklist(){
-    const [kw, setKw] = useState('');
-    const filtered = useMemo(()=>{ const k = kw.trim().toLowerCase(); return k? employees.filter(e=> e.toLowerCase().includes(k)) : employees; }, [kw, employees]);
-    const listRef = useRef(null);
-    const withStay = (cb)=>{ const el=listRef.current; const st=el?el.scrollTop:0; const sl=el?el.scrollLeft:0; cb(); requestAnimationFrame(()=>{ const node=listRef.current; if(node){ node.scrollTop = st; node.scrollLeft = sl; } }); };
-    const selectedCount = filtered.filter(name=> !!albumSelected[name]).length;
-    return (
-      <div className="rounded-2xl border bg-gradient-to-br from-white via-white to-indigo-50/40 p-3">
-        <div className="flex items-center gap-2 mb-2">
-          <input className="border rounded px-2 py-1 text-sm flex-1" placeholder="搜索姓名…" value={kw} onChange={e=> setKw(e.target.value)} />
-          <span className="text-xs text-gray-500 whitespace-nowrap">已选 {albumCheckedList.length} / {employees.length}</span>
-        </div>
-        <div className="flex items-center justify-between text-xs text-gray-600 mb-2">
-          <div>当前筛选：{filtered.length} 人；选中 {selectedCount} 人</div>
-          <div className="space-x-1">
-            <button className={`px-2 py-1 rounded border text-xs ${editingLocked?'opacity-50 cursor-not-allowed':''}`} disabled={editingLocked} onClick={()=> withStay(()=>{ const next={...albumSelected}; filtered.forEach(n=> next[n]=true); setAlbumSelected(next); })}>全选</button>
-            <button className={`px-2 py-1 rounded border text-xs ${editingLocked?'opacity-50 cursor-not-allowed':''}`} disabled={editingLocked || filtered.length===0} onClick={()=> withStay(()=> setAlbumSelected(prev=>{ const next={...prev}; filtered.forEach(n=>{ next[n] = !prev[n]; }); return next; }))}>反选</button>
-            <button className={`px-2 py-1 rounded border text-xs ${editingLocked?'opacity-50 cursor-not-allowed':''}`} disabled={editingLocked || filtered.length===0} onClick={()=> withStay(()=> setAlbumSelected(prev=>{ const next={...prev}; filtered.forEach(n=>{ next[n] = false; }); return next; }))}>清空</button>
-          </div>
-        </div>
-        <div ref={listRef} className="max-h-64 overflow-auto divide-y">
-          {filtered.map(name=> (
-            <label key={name} className="flex items-center gap-2 py-1 text-sm">
-              <input type="checkbox" checked={!!albumSelected[name]} disabled={editingLocked} onChange={()=> withStay(()=> setAlbumSelected(prev=> ({ ...prev, [name]: !prev[name] })))} />
-              <span>{name}</span>
-            </label>
-          ))}
-          {filtered.length===0 && <div className="text-xs text-gray-400 py-3 text-center">未找到匹配人员</div>}
-        </div>
-        <div className="mt-3 text-xs text-gray-500 bg-indigo-50/50 rounded-xl px-3 py-2">
-          勾选后的人员将参与专辑审核排班与统计；未选择偏好时不会进入预测与自动分配。
-        </div>
-      </div>
-    );
-  }
-
   const handleRunMainRule = async () => {
     const targets = checkedList.length ? checkedList : employees;
     if (targets.length === 0) {
@@ -1235,228 +1201,81 @@ function App(){
     setAlbumAutoNote('排班已更新，右侧统计已同步。');
   };
 
+  const handleAlbumToggle = (name) => {
+    if (!name) return;
+    setAlbumSelected((prev) => {
+      const next = prev && typeof prev === 'object' ? { ...prev } : {};
+      next[name] = !next[name];
+      return next;
+    });
+  };
+  const handleAlbumSelectAll = (names = []) => {
+    if (!Array.isArray(names) || names.length === 0) return;
+    setAlbumSelected((prev) => {
+      const next = prev && typeof prev === 'object' ? { ...prev } : {};
+      names.forEach((n) => {
+        next[n] = true;
+      });
+      return next;
+    });
+  };
+  const handleAlbumSelectInverse = (names = []) => {
+    if (!Array.isArray(names) || names.length === 0) return;
+    setAlbumSelected((prev) => {
+      const next = prev && typeof prev === 'object' ? { ...prev } : {};
+      names.forEach((n) => {
+        next[n] = !next[n];
+      });
+      return next;
+    });
+  };
+  const handleAlbumSelectClear = (names = []) => {
+    if (!Array.isArray(names) || names.length === 0) return;
+    setAlbumSelected((prev) => {
+      const next = prev && typeof prev === 'object' ? { ...prev } : {};
+      names.forEach((n) => {
+        next[n] = false;
+      });
+      return next;
+    });
+  };
+
   const ViewAlbum = (
-    <Section title="专辑审核自动排班" right={<span className="text-xs text-gray-500">白班 1 人 + 中1 1 人，时长均衡的审核计划</span>}>
-      <div className="grid grid-cols-1 xl:grid-cols-4 gap-4 items-start">
-        <div className="space-y-4">
-          <AlbumEmployeeChecklist/>
-          <div className="rounded-2xl border bg-gradient-to-br from-white via-white to-amber-50/60 p-4 space-y-3">
-            <div className="flex items-center gap-2 text-sm font-medium text-amber-700"><Icon name="magic" className="w-4 h-4"/>自动排班参数</div>
-            <div className="grid grid-cols-1 gap-2 text-sm text-gray-600">
-              <label className="flex items-center justify-between gap-2">开始月份<MonthInput className="border rounded px-2 py-1" value={albumRangeStartMonth} onChange={setAlbumRangeStartMonth} disabled={editingLocked} /></label>
-              <label className="flex items-center justify-between gap-2">结束月份<MonthInput className="border rounded px-2 py-1" value={albumRangeEndMonth} onChange={setAlbumRangeEndMonth} disabled={editingLocked} /></label>
-              <label className="flex items-center justify-between gap-2">白班时长（小时）<input type="number" step="0.01" min="0" className="border rounded px-2 py-1 w-24 text-right" value={albumWhiteHour}
-                onChange={e=> setAlbumWhiteHour(Number.parseFloat(e.target.value||'0')||0)} /></label>
-              <label className="flex items-center justify-between gap-2">中1时长（小时）<input type="number" step="0.01" min="0" className="border rounded px-2 py-1 w-24 text-right" value={albumMidHour}
-                onChange={e=> setAlbumMidHour(Number.parseFloat(e.target.value||'0')||0)} /></label>
-              <label className="flex items-center justify-between gap-2">允许时长差值 ±<input type="number" step="0.01" min="0" className="border rounded px-2 py-1 w-24 text-right" value={albumMaxDiff}
-                onChange={e=> setAlbumMaxDiff(e.target.value===''?0:Number.parseFloat(e.target.value)||0)} /></label>
-            </div>
-            <PillBtn color="indigo" onClick={autoAssignAlbum} disabled={editingLocked || albumCheckedList.length===0 || albumDates.length===0} title={albumCheckedList.length===0? '请先勾选人员': albumDates.length===0? '请先设置有效月份范围': (editingLocked?'执行中：只读':'' )}>智能生成专辑审核排班</PillBtn>
-            {albumAutoNote && <div className="text-xs text-indigo-600 bg-indigo-50/80 border border-indigo-100 rounded-xl px-3 py-2">{albumAutoNote}</div>}
-            <div className="text-xs text-gray-500">提示：参数调整后可重新生成；排班结果支持右侧表格内手动微调。</div>
-          </div>
-        </div>
-
-        <div className="space-y-4 xl:col-span-3">
-          <div className="rounded-2xl border bg-white/90 p-4">
-            <div className="flex flex-wrap items-center justify-between gap-2 text-sm font-medium text-gray-700">
-              <div className="flex items-center gap-2">
-                <span>排班概览</span>
-                <span className="text-xs text-gray-400">{albumRange? `${albumRange.start} ~ ${albumRange.end}` : '请选择排班月份范围'}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <PillBtn color="emerald" onClick={confirmAlbumPlan} disabled={editingLocked || !albumRange || albumDates.length===0} title={editingLocked? '执行中：只读': (!albumRange || albumDates.length===0 ? '请先设置有效的月份范围' : '确认排班并写入历史')}>确认排班</PillBtn>
-                <PillBtn color="gray" onClick={exportAlbumPlan} disabled={albumDates.length===0} title={albumDates.length===0 ? '暂无可导出的排班数据' : '导出为 Excel'}>导出 Excel</PillBtn>
-              </div>
-            </div>
-            {albumRange ? (
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-3 text-sm">
-                <div className="rounded-2xl border bg-gradient-to-br from-indigo-50 to-white px-3 py-2">
-                  <div className="text-xs text-gray-500">覆盖天数</div>
-                  <div className="text-lg font-semibold text-indigo-700">{albumCoverage.totalDays}</div>
-                </div>
-                <div className="rounded-2xl border bg-gradient-to-br from-sky-50 to-white px-3 py-2">
-                  <div className="text-xs text-gray-500">白班已分配</div>
-                  <div className="text-lg font-semibold text-sky-600">{albumCoverage.whiteAssigned}<span className="text-xs text-gray-500 ml-1">天</span></div>
-                </div>
-                <div className="rounded-2xl border bg-gradient-to-br from-amber-50 to-white px-3 py-2">
-                  <div className="text-xs text-gray-500">中1已分配</div>
-                  <div className="text-lg font-semibold text-amber-600">{albumCoverage.midAssigned}<span className="text-xs text-gray-500 ml-1">天</span></div>
-                </div>
-                <div className="rounded-2xl border bg-gradient-to-br from-emerald-50 to-white px-3 py-2">
-                  <div className="text-xs text-gray-500">时长差值</div>
-                  <div className={`text-lg font-semibold ${albumDiff <= (Number.isFinite(albumMaxDiff)? Math.max(0, albumMaxDiff) : albumDiff+1) ? 'text-emerald-600':'text-rose-600'}`}>{albumDiff.toFixed(2)}<span className="text-xs text-gray-500 ml-1">小时</span></div>
-                </div>
-              </div>
-            ) : (
-              <div className="text-xs text-gray-500 mt-3">尚未设置有效范围，请在左侧选择月份。</div>
-            )}
-          </div>
-
-          <div className="rounded-2xl border bg-white overflow-hidden">
-            <div className="px-4 py-3 border-b bg-gray-50 text-sm font-medium text-gray-700 flex items-center justify-between">
-              <span>播单专辑审核排班表</span>
-              <div className="flex items-center gap-3">
-                <span className="text-xs text-gray-400">支持手动微调，实时更新统计</span>
-                <button onClick={exportAlbumPlan} disabled={albumDates.length===0}
-                  className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${albumDates.length===0 ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-indigo-600 text-white hover:bg-indigo-500'}`}>
-                  导出 Excel
-                </button>
-              </div>
-            </div>
-            {albumDates.length===0 ? (
-              <div className="p-4 text-xs text-gray-500">请选择有效月份后再生成排班。</div>
-            ) : (
-              <div className="overflow-auto">
-                <table className="min-w-[520px] w-full text-sm">
-                  <thead className="bg-gray-50 text-gray-500">
-                    <tr>
-                      <th className="text-left py-2 px-3">日期</th>
-                      <th className="text-left py-2 px-3">星期</th>
-                      <th className="text-left py-2 px-3">白班审核人</th>
-                      <th className="text-left py-2 px-3">中班审核人</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {albumDates.map(day=>{
-                      const info = albumAssignments[day] || { white:'', mid:'' };
-                      const row = data[day] || {};
-                      const weekLabel = WN[new Date(day).getDay()];
-                      const whiteCandidates = albumCheckedList.filter(emp=> (row[emp]||'')==='白');
-                      const midCandidates = albumCheckedList.filter(emp=> (row[emp]||'')==='中1');
-                      const whiteClass = `border rounded px-2 py-1 w-full text-sm transition-colors ${info.white ? 'bg-white border-gray-200 text-gray-700' : 'bg-rose-50 border-rose-200 text-rose-600'}`;
-                      const midClass = `border rounded px-2 py-1 w-full text-sm transition-colors ${info.mid ? 'bg-white border-gray-200 text-gray-700' : 'bg-rose-50 border-rose-200 text-rose-600'}`;
-                      return (
-                        <tr key={`album-${day}`} className="border-t hover:bg-indigo-50/20">
-                          <td className="py-1.5 px-3 font-medium text-gray-700">{day}</td>
-                          <td className="py-1.5 px-3 text-gray-500">周{weekLabel}</td>
-                          <td className="py-1.5 px-3">
-                            <select
-                              className={whiteClass}
-                              value={info.white || ''}
-                              onChange={e=> updateAlbumAssignment(day, 'white', e.target.value)}
-                              title={whiteCandidates.length===0 ? '当日无白班可选' : '请选择白班审核人'}
-                            >
-                              <option value="">未分配</option>
-                              {whiteCandidates.map(emp=> (
-                                <option key={`${day}-${emp}-white`} value={emp}>{emp}</option>
-                              ))}
-                            </select>
-                          </td>
-                          <td className="py-1.5 px-3">
-                            <select
-                              className={midClass}
-                              value={info.mid || ''}
-                              onChange={e=> updateAlbumAssignment(day, 'mid', e.target.value)}
-                              title={midCandidates.length===0 ? '当日无中1可选' : '请选择中班审核人'}
-                            >
-                              <option value="">未分配</option>
-                              {midCandidates.map(emp=> (
-                                <option key={`${day}-${emp}-mid`} value={emp}>{emp}</option>
-                              ))}
-                            </select>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-
-          <div className="rounded-2xl border bg-white overflow-hidden">
-            <div className="px-4 py-3 border-b bg-gray-50 text-sm font-medium text-gray-700 flex items-center justify-between">
-              <span>筛选范围内班次预览</span>
-              <span className="text-xs text-gray-400">仅显示已勾选人员</span>
-            </div>
-            {albumDates.length===0 || albumCheckedList.length===0 ? (
-              <div className="p-4 text-xs text-gray-500">请选择人员并确保月份范围与当前排班有交集。</div>
-            ) : (
-              <div className="overflow-auto">
-                <table className="min-w-[620px] w-full text-sm">
-                  <thead className="bg-gray-50 text-gray-500">
-                    <tr>
-                      <th className="text-left py-2 px-3">日期</th>
-                      <th className="text-left py-2 px-3">星期</th>
-                      {albumCheckedList.map(emp=> <th key={emp} className="text-left py-2 px-3">{emp}</th>)}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {albumDates.map(day=>{
-                      const wk = WN[new Date(day).getDay()];
-                      return (
-                        <tr key={`preview-${day}`} className="border-t hover:bg-gray-50">
-                          <td className="py-1.5 px-3 font-medium text-gray-700">{day}</td>
-                          <td className="py-1.5 px-3 text-gray-500">周{wk}</td>
-                          {albumCheckedList.map(emp=>{
-                            const shift = (data[day]||{})[emp] || '';
-                            const bg = shiftColors[shift] || '#f9fafb';
-                            return (
-                              <td key={`${day}-${emp}`} className="py-1.5 px-3">
-                                <span className="px-2 py-1 rounded-full text-xs" style={{ backgroundColor: bg }}>{shift || '—'}</span>
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-
-          <div className="rounded-2xl border bg-white overflow-hidden">
-            <div className="px-4 py-3 border-b bg-gray-50 text-sm font-medium text-gray-700 flex items-center justify-between">
-              <span>人员审核时长统计</span>
-              <span className="text-xs text-gray-400">实时对齐白班/中班天数与小时</span>
-            </div>
-            {albumCheckedList.length===0 ? (
-              <div className="p-4 text-xs text-gray-500">尚未勾选专辑审核人员。</div>
-            ) : (
-              <div className="overflow-auto">
-                <table className="min-w-[600px] w-full text-sm">
-                  <thead className="bg-gray-50 text-gray-500">
-                    <tr>
-                      <th className="text-left py-2 px-3">人员</th>
-                      <th className="text-right py-2 px-3">白班天数</th>
-                      <th className="text-right py-2 px-3">白班时长</th>
-                      <th className="text-right py-2 px-3">中班天数</th>
-                      <th className="text-right py-2 px-3">中班时长</th>
-                      <th className="text-right py-2 px-3">总时长</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {albumStats.map(row=> (
-                      <tr key={`stat-${row.emp}`} className="border-t hover:bg-gray-50">
-                        <td className="py-1.5 px-3 text-gray-700">{row.emp}</td>
-                        <td className="py-1.5 px-3 text-right">{row.whiteDays}</td>
-                        <td className="py-1.5 px-3 text-right">{row.whiteHours.toFixed(2)}</td>
-                        <td className="py-1.5 px-3 text-right">{row.midDays}</td>
-                        <td className="py-1.5 px-3 text-right">{row.midHours.toFixed(2)}</td>
-                        <td className="py-1.5 px-3 text-right font-medium">{row.totalHours.toFixed(2)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot className="bg-indigo-50/60 text-sm">
-                    <tr>
-                      <td className="py-2 px-3 font-medium text-gray-700">合计</td>
-                      <td className="py-2 px-3 text-right font-medium">{albumTotals.whiteDays}</td>
-                      <td className="py-2 px-3 text-right font-medium">{albumTotals.whiteHours.toFixed(2)}</td>
-                      <td className="py-2 px-3 text-right font-medium">{albumTotals.midDays}</td>
-                      <td className="py-2 px-3 text-right font-medium">{albumTotals.midHours.toFixed(2)}</td>
-                      <td className="py-2 px-3 text-right font-semibold text-indigo-700">{albumTotals.totalHours.toFixed(2)}</td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </Section>
+    <AlbumSection
+      employees={employees}
+      albumSelected={albumSelected}
+      albumCheckedList={albumCheckedList}
+      editingLocked={editingLocked}
+      onToggleEmployee={handleAlbumToggle}
+      onSelectAllEmployees={handleAlbumSelectAll}
+      onSelectInverseEmployees={handleAlbumSelectInverse}
+      onClearSelectedEmployees={handleAlbumSelectClear}
+      albumRangeStartMonth={albumRangeStartMonth}
+      albumRangeEndMonth={albumRangeEndMonth}
+      onChangeRangeStart={setAlbumRangeStartMonth}
+      onChangeRangeEnd={setAlbumRangeEndMonth}
+      albumWhiteHour={albumWhiteHour}
+      onChangeWhiteHour={setAlbumWhiteHour}
+      albumMidHour={albumMidHour}
+      onChangeMidHour={setAlbumMidHour}
+      albumMaxDiff={albumMaxDiff}
+      onChangeMaxDiff={setAlbumMaxDiff}
+      autoAssignAlbum={autoAssignAlbum}
+      albumAutoNote={albumAutoNote}
+      albumRange={albumRange}
+      albumDates={albumDates}
+      confirmAlbumPlan={confirmAlbumPlan}
+      exportAlbumPlan={exportAlbumPlan}
+      albumAssignments={albumAssignments}
+      updateAlbumAssignment={updateAlbumAssignment}
+      data={data}
+      shiftColors={shiftColors}
+      albumStats={albumStats}
+      albumTotals={albumTotals}
+      albumDiff={albumDiff}
+      albumCoverage={albumCoverage}
+      WN={WN}
+    />
   );
 
   const [empInput, setEmpInput] = useState('');
@@ -1473,69 +1292,101 @@ function App(){
     return base;
   }, [employees, restPrefs]);
   const hasRestForecast = useMemo(()=> employees.some(emp=> !!restPrefs[emp]), [employees, restPrefs]);
+  const handleBulkAddEmployees = () => {
+    const names = (empInput || '').split(/\n|,|\s+/).map((n) => (n || '').trim()).filter(Boolean);
+    if (names.length === 0) {
+      setEmpInput('');
+      return;
+    }
+    setEmployees((prev) => {
+      const existing = new Set(prev);
+      const next = [...prev];
+      let changed = false;
+      names.forEach((name) => {
+        if (!existing.has(name)) {
+          existing.add(name);
+          next.push(name);
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+    setEmpInput('');
+  };
+
+  const handleRestPrefChange = (emp, pair) => {
+    const sanitized = sanitizeRestPairValue(pair);
+    setRestPrefs((prev) => {
+      const current = prev && typeof prev === 'object' ? prev[emp] : undefined;
+      if (sanitized) {
+        if (current === sanitized) return prev;
+        return { ...(prev || {}), [emp]: sanitized };
+      }
+      if (!prev || !(emp in prev)) return prev;
+      const next = { ...prev };
+      delete next[emp];
+      return next;
+    });
+  };
+
+  const handleRestPrefClear = (emp) => {
+    setRestPrefs((prev) => {
+      if (!prev || !(emp in prev)) return prev;
+      const next = { ...prev };
+      delete next[emp];
+      return next;
+    });
+  };
+
+  const handleDeleteEmployee = (emp) => {
+    setEmployees((prev) => prev.filter((name) => name !== emp));
+    setData((prev) => {
+      const source = prev || {};
+      let changed = false;
+      const next = {};
+      Object.keys(source).forEach((day) => {
+        const row = source[day];
+        if (row && Object.prototype.hasOwnProperty.call(row, emp)) {
+          const clone = { ...row };
+          delete clone[emp];
+          next[day] = clone;
+          changed = true;
+        } else {
+          next[day] = row;
+        }
+      });
+      return changed ? next : prev;
+    });
+    setRestPrefs((prev) => {
+      if (!prev || !(emp in prev)) return prev;
+      const next = { ...prev };
+      delete next[emp];
+      return next;
+    });
+    setAlbumSelected((prev) => {
+      if (!prev || !(emp in prev)) return prev;
+      const next = { ...prev };
+      delete next[emp];
+      return next;
+    });
+  };
+
   const ViewEmployees = (
-    <Section title="员工管理" right={<span className="text-sm text-gray-500">休息偏好保存在服务器与本地（跨视图持久）</span>}>
-      <div className="grid grid-cols-1">
-        <div className="mb-6">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="text-sm font-medium text-gray-700">周一至周日在岗人数预测</h3>
-            <span className="text-xs text-gray-400">仅统计已选择休息偏好的人员</span>
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
-            {['周一','周二','周三','周四','周五','周六','周日'].map((label,idx)=>{
-              const day = idx+1;
-              return (
-                <div key={label} className="rounded-2xl border bg-gradient-to-br from-white to-sky-50/60 p-3 text-center shadow-sm">
-                  <div className="text-xs text-gray-500">{label}</div>
-                  <div className="text-xl font-semibold text-sky-600">{restForecast[day] || 0}<span className="text-sm text-gray-500 ml-1">人</span></div>
-                </div>
-              );
-            })}
-          </div>
-          {!hasRestForecast && <div className="text-xs text-gray-500 mt-2">请选择休息偏好后即可实时看到在岗人数预测。</div>}
-        </div>
-        <div className="mb-4">
-          <label className="block text-sm text-gray-600 mb-1">批量添加（每行/逗号分隔）</label>
-          <div className="flex gap-2 items-start">
-            <textarea className="flex-1 border rounded px-3 py-2 h-24" value={empInput}
-              onCompositionStart={()=>{}}
-              onCompositionEnd={(e)=>{ setEmpInput(e.target.value); }}
-              onChange={e=>setEmpInput(e.target.value)} placeholder="张三\n李四" />
-            <PillBtn onClick={()=>{ empInput.split(/\n|,|\s+/).forEach(n=>{ const name=(n||'').trim(); if(name && !employees.includes(name)) setEmployees(prev=>[...prev, name]); }); setEmpInput(''); }} disabled={editingLocked} title={editingLocked?'执行中：只读':''}>添加</PillBtn>
-          </div>
-        </div>
-        <div className="overflow-auto">
-          <table className="text-sm min-w-[760px] w-full">
-            <thead>
-              <tr className="text-gray-500"><th className="text-left">姓名</th><th className="text-left">本次休息偏好</th><th className="text-left">操作</th></tr>
-            </thead>
-            <tbody>
-              {employees.map(e=> (
-                <tr key={e} className="border-t hover:bg-gray-50">
-                  <td className="py-1">{e}</td>
-                  <td className="py-1">
-                    <div className="flex items-center gap-2">
-                      {REST_PAIRS.map(p=> (
-                        <label key={p} className={`px-2 py-1 rounded border cursor-pointer ${restPrefs[e]===p? 'bg-indigo-50 border-indigo-300 text-indigo-700':'hover:bg-gray-50'} ${editingLocked?'opacity-60 cursor-not-allowed':''}`}>
-                          <input type="radio" name={`rest-${e}`} disabled={editingLocked} className="mr-1" checked={restPrefs[e]===p} onChange={()=> setRestPrefs(r=> ({...r, [e]: sanitizeRestPairValue(p)}))} /> 休{p}
-                        </label>
-                      ))}
-                      <button className={`px-2 py-1 rounded border ${editingLocked?'opacity-60 cursor-not-allowed':''}`} disabled={editingLocked} onClick={()=> setRestPrefs(r=>{ const x={...r}; delete x[e]; return x; })}>清除偏好</button>
-                    </div>
-                  </td>
-                  <td className="py-1"><button className={`text-red-600 ${editingLocked?'opacity-60 cursor-not-allowed':''}`} disabled={editingLocked} onClick={()=>{
-                    setEmployees(prev=> prev.filter(x=>x!==e));
-                    setData(prev=>{ const next={...prev}; for(const d of Object.keys(next)){ if(next[d] && (e in (next[d]||{}))){ const r={...next[d]}; delete r[e]; next[d]=r; } } return next; });
-                    setRestPrefs(r=>{ const x={...r}; delete x[e]; return x; });
-                  }}>删除</button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div className="mt-3"><PillBtn color="emerald" onClick={saveToServer} disabled={editingLocked} title={editingLocked?'执行中：只读':''}>保存人员与偏好到服务器</PillBtn></div>
-      </div>
-    </Section>
+    <EmployeesSection
+      employees={employees}
+      restPrefs={restPrefs}
+      restForecast={restForecast}
+      hasRestForecast={hasRestForecast}
+      empInput={empInput}
+      editingLocked={editingLocked}
+      restPairs={REST_PAIRS}
+      onEmpInputChange={setEmpInput}
+      onBulkAdd={handleBulkAddEmployees}
+      onRestPrefChange={handleRestPrefChange}
+      onRestPrefClear={handleRestPrefClear}
+      onDeleteEmployee={handleDeleteEmployee}
+      onSave={saveToServer}
+    />
   );
 
   function periodRanges(){

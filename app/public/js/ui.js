@@ -1325,6 +1325,649 @@ const SettingsSection = ({
   </Section>
 );
 
+// 专辑审核人员勾选列表，提供搜索与批量操作
+const AlbumEmployeeChecklist = ({
+  employees = [],
+  albumSelected = {},
+  albumCheckedList = [],
+  editingLocked = false,
+  onToggle,
+  onSelectAll,
+  onSelectInverse,
+  onSelectClear,
+}) => {
+  const [kw, setKw] = useState('');
+  const filtered = useMemo(() => {
+    const keyword = kw.trim().toLowerCase();
+    if (!keyword) return employees;
+    return employees.filter((name) => name.toLowerCase().includes(keyword));
+  }, [kw, employees]);
+  const listRef = useRef(null);
+  const withStay = (cb) => {
+    const el = listRef.current;
+    const top = el ? el.scrollTop : 0;
+    const left = el ? el.scrollLeft : 0;
+    cb();
+    requestAnimationFrame(() => {
+      const node = listRef.current;
+      if (node) {
+        node.scrollTop = top;
+        node.scrollLeft = left;
+      }
+    });
+  };
+  const selectedCount = useMemo(
+    () => filtered.filter((name) => !!albumSelected?.[name]).length,
+    [filtered, albumSelected],
+  );
+  return (
+    <div className="rounded-2xl border bg-gradient-to-br from-white via-white to-indigo-50/40 p-3">
+      <div className="flex items-center gap-2 mb-2">
+        <input
+          className="border rounded px-2 py-1 text-sm flex-1"
+          placeholder="搜索姓名…"
+          value={kw}
+          onChange={(e) => setKw(e.target.value)}
+        />
+        <span className="text-xs text-gray-500 whitespace-nowrap">
+          已选 {albumCheckedList.length} / {employees.length}
+        </span>
+      </div>
+      <div className="flex items-center justify-between text-xs text-gray-600 mb-2">
+        <div>
+          当前筛选：{filtered.length} 人；选中 {selectedCount} 人
+        </div>
+        <div className="space-x-1">
+          <button
+            className={`px-2 py-1 rounded border text-xs ${editingLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
+            disabled={editingLocked}
+            onClick={() => withStay(() => onSelectAll && onSelectAll(filtered))}
+          >
+            全选
+          </button>
+          <button
+            className={`px-2 py-1 rounded border text-xs ${editingLocked || filtered.length === 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
+            disabled={editingLocked || filtered.length === 0}
+            onClick={() => withStay(() => onSelectInverse && onSelectInverse(filtered))}
+          >
+            反选
+          </button>
+          <button
+            className={`px-2 py-1 rounded border text-xs ${editingLocked || filtered.length === 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
+            disabled={editingLocked || filtered.length === 0}
+            onClick={() => withStay(() => onSelectClear && onSelectClear(filtered))}
+          >
+            清空
+          </button>
+        </div>
+      </div>
+      <div ref={listRef} className="max-h-64 overflow-auto divide-y">
+        {filtered.map((name) => (
+          <label key={name} className="flex items-center gap-2 py-1 text-sm">
+            <input
+              type="checkbox"
+              checked={!!albumSelected?.[name]}
+              disabled={editingLocked}
+              onChange={() => withStay(() => onToggle && onToggle(name))}
+            />
+            <span>{name}</span>
+          </label>
+        ))}
+        {filtered.length === 0 && (
+          <div className="text-xs text-gray-400 py-3 text-center">未找到匹配人员</div>
+        )}
+      </div>
+      <div className="mt-3 text-xs text-gray-500 bg-indigo-50/50 rounded-xl px-3 py-2">
+        勾选后的人员将参与专辑审核排班与统计；未选择偏好时不会进入预测与自动分配。
+      </div>
+    </div>
+  );
+};
+
+// 专辑审核主视图，负责展示参数、排班表与统计
+const AlbumSection = ({
+  employees = [],
+  albumSelected = {},
+  albumCheckedList = [],
+  editingLocked = false,
+  onToggleEmployee,
+  onSelectAllEmployees,
+  onSelectInverseEmployees,
+  onClearSelectedEmployees,
+  albumRangeStartMonth,
+  albumRangeEndMonth,
+  onChangeRangeStart,
+  onChangeRangeEnd,
+  albumWhiteHour = 0,
+  onChangeWhiteHour,
+  albumMidHour = 0,
+  onChangeMidHour,
+  albumMaxDiff = 0,
+  onChangeMaxDiff,
+  autoAssignAlbum,
+  albumAutoNote,
+  albumRange,
+  albumDates = [],
+  confirmAlbumPlan,
+  exportAlbumPlan,
+  albumAssignments = {},
+  updateAlbumAssignment,
+  data = {},
+  shiftColors = {},
+  albumStats = [],
+  albumTotals = { whiteDays: 0, midDays: 0, whiteHours: 0, midHours: 0, totalHours: 0 },
+  albumDiff = 0,
+  albumCoverage = { totalDays: 0, whiteAssigned: 0, midAssigned: 0 },
+  WN = [],
+}) => {
+  const safeDates = Array.isArray(albumDates) ? albumDates : [];
+  const safeChecked = Array.isArray(albumCheckedList) ? albumCheckedList : [];
+  const safeStats = Array.isArray(albumStats) ? albumStats : [];
+  const coverage = albumCoverage || { totalDays: 0, whiteAssigned: 0, midAssigned: 0 };
+  const totals = albumTotals || { whiteDays: 0, midDays: 0, whiteHours: 0, midHours: 0, totalHours: 0 };
+  const handleAutoAssign = () => autoAssignAlbum && autoAssignAlbum();
+  const handleConfirm = () => confirmAlbumPlan && confirmAlbumPlan();
+  const handleExport = () => exportAlbumPlan && exportAlbumPlan();
+  const safeWN = Array.isArray(WN) && WN.length ? WN : ['日', '一', '二', '三', '四', '五', '六'];
+  return (
+    <Section
+      title="专辑审核自动排班"
+      right={<span className="text-xs text-gray-500">白班 1 人 + 中1 1 人，时长均衡的审核计划</span>}
+    >
+      <div className="grid grid-cols-1 xl:grid-cols-4 gap-4 items-start">
+        <div className="space-y-4">
+          <AlbumEmployeeChecklist
+            employees={employees}
+            albumSelected={albumSelected}
+            albumCheckedList={safeChecked}
+            editingLocked={editingLocked}
+            onToggle={onToggleEmployee}
+            onSelectAll={onSelectAllEmployees}
+            onSelectInverse={onSelectInverseEmployees}
+            onSelectClear={onClearSelectedEmployees}
+          />
+          <div className="rounded-2xl border bg-gradient-to-br from-white via-white to-amber-50/60 p-4 space-y-3">
+            <div className="flex items-center gap-2 text-sm font-medium text-amber-700">
+              <Icon name="magic" className="w-4 h-4" />自动排班参数
+            </div>
+            <div className="grid grid-cols-1 gap-2 text-sm text-gray-600">
+              <label className="flex items-center justify-between gap-2">
+                开始月份
+                <MonthInput
+                  className="border rounded px-2 py-1"
+                  value={albumRangeStartMonth}
+                  onChange={onChangeRangeStart}
+                  disabled={editingLocked}
+                />
+              </label>
+              <label className="flex items-center justify-between gap-2">
+                结束月份
+                <MonthInput
+                  className="border rounded px-2 py-1"
+                  value={albumRangeEndMonth}
+                  onChange={onChangeRangeEnd}
+                  disabled={editingLocked}
+                />
+              </label>
+              <label className="flex items-center justify-between gap-2">
+                白班时长（小时）
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  className="border rounded px-2 py-1 w-24 text-right"
+                  value={albumWhiteHour}
+                  onChange={(e) => onChangeWhiteHour && onChangeWhiteHour(Number.parseFloat(e.target.value || '0') || 0)}
+                />
+              </label>
+              <label className="flex items-center justify-between gap-2">
+                中1时长（小时）
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  className="border rounded px-2 py-1 w-24 text-right"
+                  value={albumMidHour}
+                  onChange={(e) => onChangeMidHour && onChangeMidHour(Number.parseFloat(e.target.value || '0') || 0)}
+                />
+              </label>
+              <label className="flex items-center justify-between gap-2">
+                允许时长差值 ±
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  className="border rounded px-2 py-1 w-24 text-right"
+                  value={albumMaxDiff}
+                  onChange={(e) =>
+                    onChangeMaxDiff &&
+                    onChangeMaxDiff(e.target.value === '' ? 0 : Number.parseFloat(e.target.value) || 0)
+                  }
+                />
+              </label>
+            </div>
+            <PillBtn
+              color="indigo"
+              onClick={handleAutoAssign}
+              disabled={editingLocked || safeChecked.length === 0 || safeDates.length === 0}
+              title={
+                safeChecked.length === 0
+                  ? '请先勾选人员'
+                  : safeDates.length === 0
+                  ? '请先设置有效月份范围'
+                  : editingLocked
+                  ? '执行中：只读'
+                  : ''
+              }
+            >
+              智能生成专辑审核排班
+            </PillBtn>
+            {albumAutoNote && (
+              <div className="text-xs text-indigo-600 bg-indigo-50/80 border border-indigo-100 rounded-xl px-3 py-2">
+                {albumAutoNote}
+              </div>
+            )}
+            <div className="text-xs text-gray-500">提示：参数调整后可重新生成；排班结果支持右侧表格内手动微调。</div>
+          </div>
+        </div>
+
+        <div className="space-y-4 xl:col-span-3">
+          <div className="rounded-2xl border bg-white/90 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-sm font-medium text-gray-700">
+              <div className="flex items-center gap-2">
+                <span>排班概览</span>
+                <span className="text-xs text-gray-400">
+                  {albumRange ? `${albumRange.start} ~ ${albumRange.end}` : '请选择排班月份范围'}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <PillBtn
+                  color="emerald"
+                  onClick={handleConfirm}
+                  disabled={editingLocked || !albumRange || safeDates.length === 0}
+                  title={
+                    editingLocked
+                      ? '执行中：只读'
+                      : !albumRange || safeDates.length === 0
+                      ? '请先设置有效的月份范围'
+                      : '确认排班并写入历史'
+                  }
+                >
+                  确认排班
+                </PillBtn>
+                <PillBtn
+                  color="gray"
+                  onClick={handleExport}
+                  disabled={safeDates.length === 0}
+                  title={safeDates.length === 0 ? '暂无可导出的排班数据' : '导出为 Excel'}
+                >
+                  导出 Excel
+                </PillBtn>
+              </div>
+            </div>
+            {albumRange ? (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-3 text-sm">
+                <div className="rounded-2xl border bg-gradient-to-br from-indigo-50 to-white px-3 py-2">
+                  <div className="text-xs text-gray-500">覆盖天数</div>
+                  <div className="text-lg font-semibold text-indigo-700">{coverage.totalDays}</div>
+                </div>
+                <div className="rounded-2xl border bg-gradient-to-br from-sky-50 to-white px-3 py-2">
+                  <div className="text-xs text-gray-500">白班已分配</div>
+                  <div className="text-lg font-semibold text-sky-600">
+                    {coverage.whiteAssigned}
+                    <span className="text-xs text-gray-500 ml-1">天</span>
+                  </div>
+                </div>
+                <div className="rounded-2xl border bg-gradient-to-br from-amber-50 to-white px-3 py-2">
+                  <div className="text-xs text-gray-500">中1已分配</div>
+                  <div className="text-lg font-semibold text-amber-600">
+                    {coverage.midAssigned}
+                    <span className="text-xs text-gray-500 ml-1">天</span>
+                  </div>
+                </div>
+                <div className="rounded-2xl border bg-gradient-to-br from-emerald-50 to-white px-3 py-2">
+                  <div className="text-xs text-gray-500">时长差值</div>
+                  <div
+                    className={`text-lg font-semibold ${
+                      albumDiff <= (Number.isFinite(albumMaxDiff) ? Math.max(0, albumMaxDiff) : albumDiff + 1)
+                        ? 'text-emerald-600'
+                        : 'text-rose-600'
+                    }`}
+                  >
+                    {albumDiff.toFixed(2)}
+                    <span className="text-xs text-gray-500 ml-1">小时</span>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="text-xs text-gray-500 mt-3">尚未设置有效范围，请在左侧选择月份。</div>
+            )}
+          </div>
+
+          <div className="rounded-2xl border bg-white overflow-hidden">
+            <div className="px-4 py-3 border-b bg-gray-50 text-sm font-medium text-gray-700 flex items-center justify-between">
+              <span>播单专辑审核排班表</span>
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-gray-400">支持手动微调，实时更新统计</span>
+                <button
+                  onClick={handleExport}
+                  disabled={safeDates.length === 0}
+                  className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                    safeDates.length === 0
+                      ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                      : 'bg-indigo-600 text-white hover:bg-indigo-500'
+                  }`}
+                >
+                  导出 Excel
+                </button>
+              </div>
+            </div>
+            {safeDates.length === 0 ? (
+              <div className="p-4 text-xs text-gray-500">请选择有效月份后再生成排班。</div>
+            ) : (
+              <div className="overflow-auto">
+                <table className="min-w-[520px] w-full text-sm">
+                  <thead className="bg-gray-50 text-gray-500">
+                    <tr>
+                      <th className="text-left py-2 px-3">日期</th>
+                      <th className="text-left py-2 px-3">星期</th>
+                      <th className="text-left py-2 px-3">白班审核人</th>
+                      <th className="text-left py-2 px-3">中班审核人</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {safeDates.map((day) => {
+                      const info = albumAssignments?.[day] || { white: '', mid: '' };
+                      const row = data?.[day] || {};
+                      const weekLabel = safeWN[new Date(day).getDay()] || '';
+                      const whiteCandidates = safeChecked.filter((emp) => (row[emp] || '') === '白');
+                      const midCandidates = safeChecked.filter((emp) => (row[emp] || '') === '中1');
+                      const whiteClass = `border rounded px-2 py-1 w-full text-sm transition-colors ${
+                        info.white ? 'bg-white border-gray-200 text-gray-700' : 'bg-rose-50 border-rose-200 text-rose-600'
+                      }`;
+                      const midClass = `border rounded px-2 py-1 w-full text-sm transition-colors ${
+                        info.mid ? 'bg-white border-gray-200 text-gray-700' : 'bg-rose-50 border-rose-200 text-rose-600'
+                      }`;
+                      return (
+                        <tr key={`album-${day}`} className="border-t hover:bg-indigo-50/20">
+                          <td className="py-1.5 px-3 font-medium text-gray-700">{day}</td>
+                          <td className="py-1.5 px-3 text-gray-500">周{weekLabel}</td>
+                          <td className="py-1.5 px-3">
+                            <select
+                              className={whiteClass}
+                              value={info.white || ''}
+                              onChange={(e) => updateAlbumAssignment && updateAlbumAssignment(day, 'white', e.target.value)}
+                              title={whiteCandidates.length === 0 ? '当日无白班可选' : '请选择白班审核人'}
+                            >
+                              <option value="">未分配</option>
+                              {whiteCandidates.map((emp) => (
+                                <option key={`${day}-${emp}-white`} value={emp}>
+                                  {emp}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                          <td className="py-1.5 px-3">
+                            <select
+                              className={midClass}
+                              value={info.mid || ''}
+                              onChange={(e) => updateAlbumAssignment && updateAlbumAssignment(day, 'mid', e.target.value)}
+                              title={midCandidates.length === 0 ? '当日无中1可选' : '请选择中班审核人'}
+                            >
+                              <option value="">未分配</option>
+                              {midCandidates.map((emp) => (
+                                <option key={`${day}-${emp}-mid`} value={emp}>
+                                  {emp}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-2xl border bg-white overflow-hidden">
+            <div className="px-4 py-3 border-b bg-gray-50 text-sm font-medium text-gray-700 flex items-center justify-between">
+              <span>筛选范围内班次预览</span>
+              <span className="text-xs text-gray-400">仅显示已勾选人员</span>
+            </div>
+            {safeDates.length === 0 || safeChecked.length === 0 ? (
+              <div className="p-4 text-xs text-gray-500">请选择人员并确保月份范围与当前排班有交集。</div>
+            ) : (
+              <div className="overflow-auto">
+                <table className="min-w-[620px] w-full text-sm">
+                  <thead className="bg-gray-50 text-gray-500">
+                    <tr>
+                      <th className="text-left py-2 px-3">日期</th>
+                      <th className="text-left py-2 px-3">星期</th>
+                      {safeChecked.map((emp) => (
+                        <th key={emp} className="text-left py-2 px-3">
+                          {emp}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {safeDates.map((day) => {
+                      const wk = safeWN[new Date(day).getDay()] || '';
+                      return (
+                        <tr key={`preview-${day}`} className="border-t hover:bg-gray-50">
+                          <td className="py-1.5 px-3 font-medium text-gray-700">{day}</td>
+                          <td className="py-1.5 px-3 text-gray-500">周{wk}</td>
+                          {safeChecked.map((emp) => {
+                            const shift = (data?.[day] || {})[emp] || '';
+                            const bg = shiftColors?.[shift] || '#f9fafb';
+                            return (
+                              <td key={`${day}-${emp}`} className="py-1.5 px-3">
+                                <span className="px-2 py-1 rounded-full text-xs" style={{ backgroundColor: bg }}>
+                                  {shift || '—'}
+                                </span>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-2xl border bg-white overflow-hidden">
+            <div className="px-4 py-3 border-b bg-gray-50 text-sm font-medium text-gray-700 flex items-center justify-between">
+              <span>人员审核时长统计</span>
+              <span className="text-xs text-gray-400">实时对齐白班/中班天数与小时</span>
+            </div>
+            {safeChecked.length === 0 ? (
+              <div className="p-4 text-xs text-gray-500">尚未勾选专辑审核人员。</div>
+            ) : (
+              <div className="overflow-auto">
+                <table className="min-w-[600px] w-full text-sm">
+                  <thead className="bg-gray-50 text-gray-500">
+                    <tr>
+                      <th className="text-left py-2 px-3">人员</th>
+                      <th className="text-right py-2 px-3">白班天数</th>
+                      <th className="text-right py-2 px-3">白班时长</th>
+                      <th className="text-right py-2 px-3">中班天数</th>
+                      <th className="text-right py-2 px-3">中班时长</th>
+                      <th className="text-right py-2 px-3">总时长</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {safeStats.map((row) => (
+                      <tr key={`stat-${row.emp}`} className="border-t hover:bg-gray-50">
+                        <td className="py-1.5 px-3 text-gray-700">{row.emp}</td>
+                        <td className="py-1.5 px-3 text-right">{row.whiteDays}</td>
+                        <td className="py-1.5 px-3 text-right">{row.whiteHours.toFixed(2)}</td>
+                        <td className="py-1.5 px-3 text-right">{row.midDays}</td>
+                        <td className="py-1.5 px-3 text-right">{row.midHours.toFixed(2)}</td>
+                        <td className="py-1.5 px-3 text-right font-medium">{row.totalHours.toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="bg-indigo-50/60 text-sm">
+                    <tr>
+                      <td className="py-2 px-3 font-medium text-gray-700">合计</td>
+                      <td className="py-2 px-3 text-right font-medium">{totals.whiteDays}</td>
+                      <td className="py-2 px-3 text-right font-medium">{totals.whiteHours.toFixed(2)}</td>
+                      <td className="py-2 px-3 text-right font-medium">{totals.midDays}</td>
+                      <td className="py-2 px-3 text-right font-medium">{totals.midHours.toFixed(2)}</td>
+                      <td className="py-2 px-3 text-right font-semibold text-indigo-700">{totals.totalHours.toFixed(2)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </Section>
+  );
+};
+
+// 员工管理视图，承担批量导入、偏好维护与清单展示
+const EmployeesSection = ({
+  employees = [],
+  restPrefs = {},
+  restForecast = {},
+  hasRestForecast = false,
+  empInput = '',
+  editingLocked = false,
+  restPairs = [],
+  onEmpInputChange,
+  onBulkAdd,
+  onRestPrefChange,
+  onRestPrefClear,
+  onDeleteEmployee,
+  onSave,
+}) => (
+  <Section
+    title="员工管理"
+    right={<span className="text-sm text-gray-500">休息偏好保存在服务器与本地（跨视图持久）</span>}
+  >
+    <div className="grid grid-cols-1">
+      <div className="mb-6">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-medium text-gray-700">周一至周日在岗人数预测</h3>
+          <span className="text-xs text-gray-400">仅统计已选择休息偏好的人员</span>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+          {['周一', '周二', '周三', '周四', '周五', '周六', '周日'].map((label, idx) => {
+            const day = idx + 1;
+            return (
+              <div
+                key={label}
+                className="rounded-2xl border bg-gradient-to-br from-white to-sky-50/60 p-3 text-center shadow-sm"
+              >
+                <div className="text-xs text-gray-500">{label}</div>
+                <div className="text-xl font-semibold text-sky-600">
+                  {restForecast?.[day] || 0}
+                  <span className="text-sm text-gray-500 ml-1">人</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        {!hasRestForecast && (
+          <div className="text-xs text-gray-500 mt-2">请选择休息偏好后即可实时看到在岗人数预测。</div>
+        )}
+      </div>
+      <div className="mb-4">
+        <label className="block text-sm text-gray-600 mb-1">批量添加（每行/逗号分隔）</label>
+        <div className="flex gap-2 items-start">
+          <textarea
+            className="flex-1 border rounded px-3 py-2 h-24"
+            value={empInput}
+            onCompositionStart={() => {}}
+            onCompositionEnd={(e) => onEmpInputChange && onEmpInputChange(e.target.value)}
+            onChange={(e) => onEmpInputChange && onEmpInputChange(e.target.value)}
+            placeholder="张三\n李四"
+          />
+          <PillBtn
+            onClick={() => onBulkAdd && onBulkAdd()}
+            disabled={editingLocked}
+            title={editingLocked ? '执行中：只读' : ''}
+          >
+            添加
+          </PillBtn>
+        </div>
+      </div>
+      <div className="overflow-auto">
+        <table className="text-sm min-w-[760px] w-full">
+          <thead>
+            <tr className="text-gray-500">
+              <th className="text-left">姓名</th>
+              <th className="text-left">本次休息偏好</th>
+              <th className="text-left">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {employees.map((e) => (
+              <tr key={e} className="border-t hover:bg-gray-50">
+                <td className="py-1">{e}</td>
+                <td className="py-1">
+                  <div className="flex items-center gap-2">
+                    {restPairs.map((p) => (
+                      <label
+                        key={p}
+                        className={`px-2 py-1 rounded border cursor-pointer ${
+                          restPrefs?.[e] === p ? 'bg-indigo-50 border-indigo-300 text-indigo-700' : 'hover:bg-gray-50'
+                        } ${editingLocked ? 'opacity-60 cursor-not-allowed' : ''}`}
+                      >
+                        <input
+                          type="radio"
+                          name={`rest-${e}`}
+                          disabled={editingLocked}
+                          className="mr-1"
+                          checked={restPrefs?.[e] === p}
+                          onChange={() => onRestPrefChange && onRestPrefChange(e, p)}
+                        />
+                        休{p}
+                      </label>
+                    ))}
+                    <button
+                      className={`px-2 py-1 rounded border ${editingLocked ? 'opacity-60 cursor-not-allowed' : ''}`}
+                      disabled={editingLocked}
+                      onClick={() => onRestPrefClear && onRestPrefClear(e)}
+                    >
+                      清除偏好
+                    </button>
+                  </div>
+                </td>
+                <td className="py-1">
+                  <button
+                    className={`text-red-600 ${editingLocked ? 'opacity-60 cursor-not-allowed' : ''}`}
+                    disabled={editingLocked}
+                    onClick={() => onDeleteEmployee && onDeleteEmployee(e)}
+                  >
+                    删除
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="mt-3">
+        <PillBtn
+          color="emerald"
+          onClick={() => onSave && onSave()}
+          disabled={editingLocked}
+          title={editingLocked ? '执行中：只读' : ''}
+        >
+          保存人员与偏好到服务器
+        </PillBtn>
+      </div>
+    </div>
+  </Section>
+);
+
 // 导出给入口脚本使用
 window.AppUI = {
   Icon,
@@ -1339,4 +1982,6 @@ window.AppUI = {
   ScheduleGridSection,
   HistorySection,
   SettingsSection,
+  AlbumSection,
+  EmployeesSection,
 };

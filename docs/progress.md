@@ -144,8 +144,13 @@
     app.php
 ```
 
+## 2025-10-14 第 13 步
+- 将专辑审核面板迁移至 `app/public/js/ui.js` 的 `AlbumSection`，入口文件仅负责传入选中人员、排班结果与导入导出回调。
+- 将员工管理页面抽离为 `EmployeesSection`，在 UI 模块内维护表单样式，入口侧集中处理批量导入、偏好变更与删除逻辑。
+- 为批量勾选与清空专辑审核人员新增辅助方法，同时在文档同步模块化进展，确保 `main.js` 继续聚焦状态与校验编排。
+
 ### 拆分总体进度速览
 - **后端接口**：`schedule.php`、`versions.php`、`auth.php`、`org_config.php` 已独立；`progress.php` 待按需补充。
 - **核心算法层**：`Scheduler.php`、`Rules.php`、`DTO.php`、`Utils.php` 完成抽离并在 API 层复用。
-- **前端静态资源**：`main.js` 仅负责状态编排；`ui.js` 已承载通用组件、排班表格、批量排班面板以及历史/设置分区；`api.js`、`state.js` 分别负责请求与规则算法。
+- **前端静态资源**：`main.js` 仅负责状态编排；`ui.js` 已承载通用组件、排班表格、批量排班、专辑审核、员工管理以及历史/设置分区；`api.js`、`state.js` 分别负责请求与规则算法。
 - **配置与存储**：`config/app.php`、`storage/` 结构稳定，等待后续细化日志与导出模块。
