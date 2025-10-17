@@ -185,14 +185,19 @@
 - `app/api/org_config.php` 改为委托核心模块处理数据，接口层仅负责路由与 HTTP 响应，异常信息统一转换为 JSON 错误。
 - 更新进度文档的完成度、目录结构说明与文件职责表，使组织配置模块的职责边界更加清晰。
 
+## 2025-10-14 第 21 步
+- 新增 `app/core/Exporter.php`，封装排班导出表头构建与 XLSX/CSV 输出流程，并补充中文注释便于复用。
+- `app/api/versions.php` 的导出接口改为调用核心导出模块，API 层仅负责数据查询与参数校验，进一步压缩控制器体积。
+- 文档同步更新完成度、整体结构速览与文件职责表，记录导出能力独立后的模块边界。
+
 ### 拆分总体进度速览
 - **后端接口**：`schedule.php`、`versions.php`、`auth.php`、`org_config.php`、`progress.php` 均已独立，下一步评估导出/统计专用接口及鉴权强化。
-- **核心算法层**：`Scheduler.php`、`Rules.php`、`DTO.php`、`Utils.php` 已抽离，`Repository.php` 统一管理排班版本数据访问，新增的 `OrgConfig.php` 与 `Storage.php`/`Progress.php` 划分了组织配置与日志存储职责。
+- **核心算法层**：`Scheduler.php`、`Rules.php`、`DTO.php`、`Utils.php` 已抽离，`Repository.php` 统一管理排班版本数据访问，新增的 `OrgConfig.php`、`Storage.php`/`Progress.php` 与 `Exporter.php` 划分了配置、日志与导出职责。
 - **前端静态资源**：`state.js` 现负责常量、校验与状态 Hook；`ui.js` 覆盖所有 React 视图；`api.js` 管理请求封装；`main.js` 专注于业务流程与组件拼装。
 - **配置与存储**：`config/app.php`、`storage/` 结构稳定，进度日志已落地至 JSONL，仍需完善导出/备份策略。
-- **完成度**：约 92%，后端与前端主体拆分完成，后续聚焦日志可视化、统计面板与权限策略细化。
+- **完成度**：约 94%，后端与前端主体拆分完成，后续聚焦日志可视化、统计面板与权限策略细化。
 
-### 现有程序结构与职责（第 20 步更新）
+### 现有程序结构与职责（第 21 步更新）
 
 | 文件 | 核心作用 | 备注/注释 |
 | --- | --- | --- |
@@ -213,6 +218,7 @@
 | `app/core/DTO.php` | 数据装配模块 | 将数据库结果转换为排班 DTO/快照 |
 | `app/core/Scheduler.php` | 排班算法辅助 | 提供历史统计、自动排班相关的算法函数 |
 | `app/core/Repository.php` | 数据访问仓储 | 封装排班版本的查询、插入、删除与列表逻辑 |
+| `app/core/Exporter.php` | 导出工具模块 | 构建表格矩阵并输出 XLSX/CSV 附件 |
 | `app/public/index.html` | 前端入口页面 | 负责加载 React、Babel 以及拆分后的脚本资源 |
 | `app/public/js/api.js` | 前端请求层 | 暴露 `apiGet`、`apiPost`、进度日志工具等方法 |
 | `app/public/js/state.js` | 状态与业务工具 | 提供常量、校验函数、调度流程与 `use*` Hook |

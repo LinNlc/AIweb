@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../core/Scheduler.php';
 require_once __DIR__ . '/../core/DTO.php';
 require_once __DIR__ . '/../core/Repository.php';
+require_once __DIR__ . '/../core/Exporter.php';
 
 /**
  * 处理排班历史版本与导出相关的 API 路由。
@@ -138,60 +139,5 @@ function versions_export_spreadsheet(): void
     $employees = $row ? (json_decode($row['employees'], true) ?: []) : [];
     $data = $row ? (json_decode($row['data'], true) ?: []) : [];
 
-    $dates = ymd_range($start, $end);
-    $header = array_merge(['日期', '星期'], $employees);
-
-    $autoloadPath = __DIR__ . '/../../vendor/autoload.php';
-    $hasSpreadsheet = is_file($autoloadPath);
-
-    if ($hasSpreadsheet) {
-        require_once $autoloadPath;
-        try {
-            $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
-            $sheet = $spreadsheet->getActiveSheet();
-            $column = 1;
-            foreach ($header as $text) {
-                $sheet->setCellValueByColumnAndRow($column++, 1, $text);
-            }
-            $rowIndex = 2;
-            foreach ($dates as $date) {
-                $rowValues = [$date, '周' . cn_week($date)];
-                foreach ($employees as $employee) {
-                    $rowValues[] = $data[$date][$employee] ?? '';
-                }
-                $column = 1;
-                foreach ($rowValues as $value) {
-                    $sheet->setCellValueByColumnAndRow($column++, $rowIndex, $value);
-                }
-                $rowIndex++;
-            }
-
-            header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-            header('Content-Disposition: attachment; filename="排班_' . $start . '_' . $end . '.xlsx"');
-
-            $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
-            $writer->save('php://output');
-            exit;
-        } catch (\Throwable $e) {
-            // 如果生成 XLSX 失败，继续向下回退到 CSV 导出。
-        }
-    }
-
-    header('Content-Type: text/csv; charset=utf-8');
-    header('Content-Disposition: attachment; filename="排班_' . $start . '_' . $end . '.csv"');
-
-    $out = fopen('php://output', 'w');
-    fwrite($out, chr(0xEF) . chr(0xBB) . chr(0xBF));
-    fputcsv($out, $header);
-
-    foreach ($dates as $date) {
-        $rowValues = [$date, '周' . cn_week($date)];
-        foreach ($employees as $employee) {
-            $rowValues[] = $data[$date][$employee] ?? '';
-        }
-        fputcsv($out, $rowValues);
-    }
-
-    fclose($out);
-    exit;
+    exporter_send_schedule($start, $end, $employees, $data);
 }
