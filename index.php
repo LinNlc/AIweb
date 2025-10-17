@@ -9,6 +9,7 @@ declare(strict_types=1);
 require __DIR__ . '/app/bootstrap.php';
 require __DIR__ . '/app/api/schedule.php';
 require __DIR__ . '/app/api/versions.php';
+require __DIR__ . '/app/api/progress.php';
 require __DIR__ . '/app/api/auth.php';
 require __DIR__ . '/app/api/org_config.php';
 
@@ -36,6 +37,10 @@ if (handle_schedule_request($method, $path)) {
 }
 
 if (handle_versions_request($method, $path)) {
+  exit;
+}
+
+if (handle_progress_request($method, $path)) {
   exit;
 }
 

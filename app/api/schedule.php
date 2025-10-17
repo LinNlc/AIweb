@@ -182,5 +182,17 @@ function schedule_save_version(): void
     ]);
 
     $newId = (int) $pdo->lastInsertId();
+
+    append_progress_log([
+        'team' => $team,
+        'stage' => 'schedule_save',
+        'message' => sprintf('保存排班版本（%s ~ %s）', $viewStart, $viewEnd),
+        'progress' => 100,
+        'context' => [
+            'versionId' => $newId,
+            'operator' => $operator,
+        ],
+    ]);
+
     send_json(['ok' => true, 'version_id' => $newId]);
 }

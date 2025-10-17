@@ -42,4 +42,22 @@ async function apiPost(path, body) {
   return resp.json();
 }
 
-window.AppAPI = { API_BASE, apiGet, apiPost };
+/**
+ * 查询进度日志，可传入 { team, limit }。
+ */
+async function fetchProgressLogs(params = {}) {
+  const search = new URLSearchParams();
+  if (params.team) search.set('team', params.team);
+  if (params.limit) search.set('limit', params.limit);
+  const query = search.toString();
+  return apiGet(`/progress${query ? `?${query}` : ''}`);
+}
+
+/**
+ * 追加一条进度日志。
+ */
+async function appendProgressLog(body) {
+  return apiPost('/progress/log', body || {});
+}
+
+window.AppAPI = { API_BASE, apiGet, apiPost, fetchProgressLogs, appendProgressLog };

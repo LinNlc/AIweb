@@ -154,9 +154,35 @@
 - 精简 `app/public/js/main.js`，入口仅负责收集状态、触发新管线并更新进度条/日志，进一步降低 2k+ 行主文件的心智负担。
 - 更新进度文档记录拆分百分比，为下一步实现进度查询 API 及存储日志落地提供参考。
 
+## 2025-10-14 第 15 步
+- 新增 `app/api/progress.php`，提供进度列表与追加接口，统一读取 `storage/logs/progress.jsonl` 供前端展示调度日志。
+- 在 `app/core/Utils.php` 扩展存储目录解析与 `append_progress_log`、`read_progress_logs` 工具函数，支撑日志写入/回放。
+- `app/api/schedule.php` 保存排班时追加进度日志，`index.php` 接入新路由，形成完整的日志链路。
+- 文档补充现有程序结构清单与模块职责说明，方便后续拆分阶段快速定位文件。
+
 ### 拆分总体进度速览
-- **后端接口**：`schedule.php`、`versions.php`、`auth.php`、`org_config.php` 已独立；`progress.php` 待按需补充。
-- **核心算法层**：`Scheduler.php`、`Rules.php`、`DTO.php`、`Utils.php` 完成抽离并在 API 层复用。
-- **前端静态资源**：`main.js` 聚焦状态编排与调度触发；`ui.js` 已承载通用组件、排班表格、批量排班、专辑审核、员工管理以及历史/设置分区；`api.js`、`state.js` 分别负责请求、业务规则与调度流水线。
-- **配置与存储**：`config/app.php`、`storage/` 结构稳定，等待后续细化日志与导出模块。
-- **完成度**：约 70%，前端模块化拆分基本成型，后续聚焦进度接口、导出及核心封装。
+- **后端接口**：`schedule.php`、`versions.php`、`auth.php`、`org_config.php`、`progress.php` 已独立完成，后续评估导出/统计专用接口。
+- **核心算法层**：`Scheduler.php`、`Rules.php`、`DTO.php`、`Utils.php` 完成抽离并提供日志、校验等共享能力。
+- **前端静态资源**：`main.js` 聚焦状态编排与调度触发；`ui.js` 承载通用组件、排班表格、批量排班、专辑审核、员工管理以及历史/设置分区；`api.js`、`state.js` 分别负责请求、业务规则与调度流水线。
+- **配置与存储**：`config/app.php`、`storage/` 结构稳定，新增日志文件落地机制后可继续补充导出、备份策略。
+- **完成度**：约 75%，后台接口拆分拓展完成，下一阶段聚焦日志可视化与导出模块细化。
+
+### 现有程序结构与职责
+- `index.php` —— 后端入口，统一引导 API 路由及静态页面输出，集中处理 404/OPTIONS 响应。
+- `app/bootstrap.php` —— 初始化配置、时区与数据库路径，预加载工具函数。
+- `app/config/app.php` —— 应用层配置（时区、数据库存储目录等）。
+- `app/api/schedule.php` —— 排班读取/保存接口，调用核心规则校验并在保存成功后写入进度日志。
+- `app/api/versions.php` —— 历史版本查询、导出与删除接口，封装数据库交互细节。
+- `app/api/progress.php` —— 进度查询与追加接口，读取/写入 `storage/logs/progress.jsonl`。
+- `app/api/auth.php` —— 登录相关占位接口，确保前端兼容。
+- `app/api/org_config.php` —— 组织配置读写接口，使用工具层数据库操作。
+- `app/core/Utils.php` —— 通用工具：数据库连接、JSON 解析、存储目录解析、进度日志读写等。
+- `app/core/Rules.php` —— 业务规则与数据归一化，包括团队标识、排班矩阵校验。
+- `app/core/DTO.php` —— 数据对象转换与排班快照装配。
+- `app/core/Scheduler.php` —— 历史统计与排班算法辅助函数。
+- `app/public/index.html` —— 前端单页入口模板，按顺序加载拆分后的脚本资源。
+- `app/public/js/api.js` —— 统一封装前端调用后端的请求方法。
+- `app/public/js/state.js` —— 状态管理、校验及自动排班/夜班流程调度。
+- `app/public/js/ui.js` —— React UI 组件集合，覆盖导航、排班表格、批量排班、员工管理等视图。
+- `app/public/js/main.js` —— 应用入口，负责状态初始化、事件绑定与组件组合。
+- `docs/progress.md` —— 拆分进度日志与整体结构说明，供后续阶段参考。
