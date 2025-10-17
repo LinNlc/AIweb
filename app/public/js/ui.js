@@ -1,0 +1,1987 @@
+// UI 组件模块：集中存放可复用的 React 视图组件
+const { useState, useEffect, useMemo, useRef } = React;
+
+// 基础图标集合，供业务面板引用
+const Icon = ({ name, className = '' }) => {
+  const common = 'w-5 h-5';
+  switch (name) {
+    case 'grid':
+      return <svg className={`${common} ${className}`} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 9h8V3H3v6zm10 12h8v-6h-8v6zM3 21h8v-6H3v6zm10-12h8V3h-8v6z" strokeWidth="1.5"/></svg>;
+    case 'users':
+      return <svg className={`${common} ${className}`} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M16 11c1.66 0 3-1.57 3-3.5S17.66 4 16 4s-3 1.57-3 3.5S14.34 11 16 11zM8 11c1.66 0 3-1.57 3-3.5S9.66 4 8 4 5 5.57 5 7.5 6.34 11 8 11zM8 13c-2.67 0-8 1.34-8 4v3h10v-3c0-1.1.9-2 2-2h4c.74 0 1.4.4 1.74 1" strokeWidth="1.5"/></svg>;
+    case 'magic':
+      return <svg className={`${common} ${className}`} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 21l9-9M14 7l3-3M11 10l3-3" strokeWidth="1.5"/></svg>;
+    case 'chart':
+      return <svg className={`${common} ${className}`} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 3v18h18M7 13v5M12 9v9M17 6v12" strokeWidth="1.5"/></svg>;
+    case 'history':
+      return <svg className={`${common} ${className}`} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 8v5l3 3M3 12a9 9 0 1 0 9-9 9 9 0 0 0-9 9zm0 0h3" strokeWidth="1.5"/></svg>;
+    case 'cog':
+      return <svg className={`${common} ${className}`} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 15.5A3.5 3.5 0 1 0 12 8.5a3.5 3.5 0 0 0 0 7z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V22a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1 1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a2 2 0 0 1-1.82.33 1.65 1.65 0 0 0-1.51 1H2a2 2 0 0 1 0-4h.09c-.49.2-.95.52-1.15 1z" strokeWidth="1"/></svg>;
+    case 'lock':
+      return <svg className={`${common} ${className}`} viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>;
+    default:
+      return null;
+  }
+};
+
+// 旋转加载图标
+const Spinner = ({ className = 'w-4 h-4 text-white' }) => (
+  <svg className={`animate-spin ${className}`} viewBox="0 0 24 24" fill="none">
+    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+    <path className="opacity-75" d="M4 12a8 8 0 0 1 8-8v4a4 4 0 0 0-4 4H4z" fill="currentColor"></path>
+  </svg>
+);
+
+// 彩色按钮，保持与旧版一致的动画与禁用态
+const colorClasses = {
+  indigo: 'bg-indigo-600 hover:bg-indigo-500',
+  emerald: 'bg-emerald-600 hover:bg-emerald-500',
+  sky: 'bg-sky-600 hover:bg-sky-500',
+  gray: 'bg-gray-800 hover:bg-gray-700'
+};
+
+const PillBtn = ({ children, onClick, color = 'indigo', type = 'button', disabled = false, title = '' }) => (
+  <button
+    type={type}
+    disabled={disabled}
+    onClick={onClick}
+    title={title}
+    className={`group relative overflow-hidden inline-flex items-center justify-center gap-2 rounded-full px-4 py-2 text-white ${disabled ? 'bg-gray-300 cursor-not-allowed' : (colorClasses[color] || colorClasses.indigo)} transition-transform duration-200 ${disabled ? '' : 'hover:-translate-y-0.5 active:translate-y-0'} shadow-md`}
+  >
+    <span className="relative z-10">{children}</span>
+    {!disabled && <span className="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity"></span>}
+  </button>
+);
+
+// 模块化的分区容器
+const Section = ({ title, children, right }) => (
+  <div className="bg-white rounded-2xl shadow p-4 mb-4 animate-fade-in">
+    <div className="flex items-center justify-between mb-3">
+      <h2 className="text-lg font-semibold">{title}</h2>
+      {right}
+    </div>
+    {children}
+  </div>
+);
+
+// 侧边导航按钮，支持高亮与图标展示
+const MenuButton = ({ active, icon, children, onClick }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className={`w-full flex items-center gap-3 rounded-xl px-3 py-2 mb-1 transition ${
+      active ? 'bg-indigo-100 text-indigo-700 shadow-inner' : 'hover:bg-gray-100 text-gray-600'
+    }`}
+  >
+    <Icon name={icon} className="w-4 h-4" />
+    <span className="text-sm flex-1 text-left">{children}</span>
+  </button>
+);
+
+// 左侧功能导航栏，悬停展开，点击切换标签页
+const SideDock = ({ tab, setTab, menuPerms }) => {
+  const [open, setOpen] = useState(false);
+  const items = [
+    { key: 'grid', icon: 'grid', label: '排班表格' },
+    { key: 'batch', icon: 'magic', label: '自动分配班次' },
+    { key: 'album', icon: 'magic', label: '专辑审核自动排班' },
+    { key: 'users', icon: 'users', label: '员工管理' },
+    { key: 'stats', icon: 'chart', label: '统计与对齐' },
+    { key: 'history', icon: 'history', label: '历史版本' },
+    { key: 'settings', icon: 'cog', label: '设置 / 导出' },
+    { key: 'roles', icon: 'lock', label: '角色设置' }
+  ];
+  return (
+    <div
+      className="dock fixed left-0 top-16 bottom-6 w-11 z-40 flex items-center"
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <div
+        className={`dock-panel absolute left-2 top-0 bottom-0 w-60 transform transition-transform duration-200 ${
+          open ? 'translate-x-0' : '-translate-x-[115%]'
+        } bg-white rounded-xl shadow p-2 border`}
+      >
+        {items
+          .filter((item) => menuPerms?.[item.key]?.visible)
+          .map((item) => (
+            <MenuButton
+              key={item.key}
+              active={tab === item.key}
+              icon={item.icon}
+              onClick={() => setTab(item.key)}
+            >
+              {item.label}
+            </MenuButton>
+          ))}
+      </div>
+      <div
+        className="dock-tab absolute right-[-12px] top-1/2 -translate-y-1/2 w-6 h-18 rounded-r-lg flex items-center justify-center bg-white text-gray-700 cursor-pointer shadow"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <svg viewBox="0 0 20 20" className="w-4 h-4">
+          <path d="M12 4l-6 6 6 6" fill="none" stroke="currentColor" strokeWidth="2" />
+        </svg>
+      </div>
+    </div>
+  );
+};
+
+// 团队切换器，下拉选择团队，支持跳转到角色管理
+const TeamSwitcher = ({ teams, value, onChange, disabled, onManage, canManage }) => {
+  const hasTeams = teams && teams.length > 0;
+  return (
+    <div className="flex items-center gap-2">
+      <select
+        className={`border rounded px-3 py-1.5 ${disabled ? 'bg-gray-100 cursor-not-allowed' : ''}`}
+        value={hasTeams ? value : ''}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled || !hasTeams}
+      >
+        {hasTeams ? (
+          teams.map((team) => (
+            <option key={team.id} value={team.id}>
+              {team.name}
+            </option>
+          ))
+        ) : (
+          <option value="">暂无团队</option>
+        )}
+      </select>
+      {canManage && (
+        <button
+          type="button"
+          onClick={onManage}
+          className="p-1.5 rounded-full border text-gray-500 hover:text-indigo-600 hover:border-indigo-300"
+          title="管理团队与权限"
+        >
+          <Icon name="cog" />
+        </button>
+      )}
+    </div>
+  );
+};
+
+// 登录弹窗，支持本地账号与后端校验
+const LoginModal = ({ onSuccess, accounts }) => {
+  const { apiPost } = window.AppAPI || {};
+  const { verifyPassword } = window.AppState || {};
+  const [username, setUsername] = useState('admin');
+  const [password, setPassword] = useState('admin');
+  const [err, setErr] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  async function doLogin(e) {
+    e.preventDefault();
+    setErr('');
+    const accountEntry = Array.isArray(accounts) ? accounts.find((acc) => acc.username === username) : null;
+    if (accountEntry && username !== 'admin') {
+      if (!verifyPassword || !verifyPassword(accountEntry.passwordHash, password)) {
+        setErr('密码错误');
+        return;
+      }
+      onSuccess({
+        username: accountEntry.username,
+        display_name: accountEntry.displayName || accountEntry.username,
+        role: accountEntry.role,
+        localAccount: true
+      });
+      return;
+    }
+    try {
+      setLoading(true);
+      if (!apiPost) {
+        throw new Error('请求模块未初始化');
+      }
+      const res = await apiPost('/login', { username, password });
+      onSuccess(res.user);
+    } catch (ex) {
+      setErr(ex.message || '登录失败');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/20 backdrop-blur flex items-center justify-center z-50">
+      <form onSubmit={doLogin} className="bg-white rounded-2xl shadow-xl p-6 w-[360px] animate-fade-in">
+        <h2 className="text-lg font-semibold mb-4 text-center">管理员登录</h2>
+        <div className="space-y-3">
+          <div>
+            <label className="block text-sm text-gray-600 mb-1">用户名</label>
+            <input
+              className="w-full border rounded px-3 py-2"
+              value={username}
+              disabled={loading}
+              onCompositionStart={() => {}}
+              onCompositionEnd={(e) => setUsername(e.target.value)}
+              onChange={(e) => setUsername(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="block text-sm text-gray-600 mb-1">密码</label>
+            <input
+              type="password"
+              className="w-full border rounded px-3 py-2"
+              value={password}
+              disabled={loading}
+              onCompositionStart={() => {}}
+              onCompositionEnd={(e) => setPassword(e.target.value)}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </div>
+          {err && <div className="text-sm text-red-600">{err}</div>}
+          <button
+            type="submit"
+            disabled={loading}
+            className={`w-full rounded-full text-white py-2 transition flex items-center justify-center gap-2 ${
+              loading ? 'bg-indigo-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-500'
+            }`}
+          >
+            {loading && <Spinner className="w-4 h-4 text-white" />}
+            <span>登录</span>
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+};
+
+// 人员批量选择列表，提供搜索与批量勾选功能
+const EmployeeChecklist = ({ employees, batchChecked, setBatchChecked, editingLocked }) => {
+  const [keyword, setKeyword] = useState('');
+  const filtered = useMemo(() => {
+    const kw = keyword.trim().toLowerCase();
+    if (!kw) {
+      return employees;
+    }
+    return employees.filter((name) => name.toLowerCase().includes(kw));
+  }, [keyword, employees]);
+  const listRef = useRef(null);
+
+  const withScrollRestore = (cb) => {
+    const node = listRef.current;
+    const top = node ? node.scrollTop : 0;
+    const left = node ? node.scrollLeft : 0;
+    cb();
+    requestAnimationFrame(() => {
+      const current = listRef.current;
+      if (current) {
+        current.scrollTop = top;
+        current.scrollLeft = left;
+      }
+    });
+  };
+
+  const selectedCount = filtered.filter((name) => !!batchChecked[name]).length;
+
+  return (
+    <div className="border rounded-xl p-3">
+      <input
+        className="border rounded px-2 py-1 text-sm w-full mb-2"
+        placeholder="搜索姓名…"
+        value={keyword}
+        onChange={(e) => setKeyword(e.target.value)}
+      />
+      <div className="flex items-center justify-between text-xs text-gray-600 mb-2">
+        <div>
+          当前筛选：{filtered.length} 人；已选 {selectedCount} 人
+        </div>
+        <div className="space-x-2">
+          <button
+            className={`px-2 py-1 rounded border ${editingLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
+            disabled={editingLocked}
+            onClick={() =>
+              withScrollRestore(() => {
+                const next = { ...batchChecked };
+                filtered.forEach((name) => {
+                  next[name] = true;
+                });
+                setBatchChecked(next);
+              })
+            }
+          >
+            全选
+          </button>
+          <button
+            className={`px-2 py-1 rounded border ${editingLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
+            disabled={editingLocked}
+            onClick={() =>
+              withScrollRestore(() =>
+                setBatchChecked((prev) => {
+                  const next = { ...prev };
+                  filtered.forEach((name) => {
+                    next[name] = !prev[name];
+                  });
+                  return next;
+                })
+              )
+            }
+          >
+            反选
+          </button>
+          <button
+            className={`px-2 py-1 rounded border ${editingLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
+            disabled={editingLocked}
+            onClick={() =>
+              withScrollRestore(() =>
+                setBatchChecked((prev) => {
+                  const next = { ...prev };
+                  filtered.forEach((name) => {
+                    next[name] = false;
+                  });
+                  return next;
+                })
+              )
+            }
+          >
+            清空
+          </button>
+        </div>
+      </div>
+      <div ref={listRef} className="max-h-64 overflow-auto divide-y">
+        {filtered.map((name) => (
+          <label key={name} className="flex items-center gap-2 py-1">
+            <input
+              type="checkbox"
+              disabled={editingLocked}
+              checked={!!batchChecked[name]}
+              onChange={() =>
+                withScrollRestore(() =>
+                  setBatchChecked((prev) => ({ ...prev, [name]: !prev[name] }))
+                )
+              }
+            />
+            <span className="text-sm">{name}</span>
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// 主自动排班规则配置面板
+const MainRulePanel = ({
+  rMin,
+  rMax,
+  pMin,
+  pMax,
+  mixMax,
+  setRMin,
+  setRMax,
+  setPMin,
+  setPMax,
+  setMixMax,
+  progRunning,
+  onRunMainRule,
+}) => (
+  <div className="bg-white rounded-xl border p-3 space-y-3">
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+      <div className="space-y-2">
+        <div className="font-medium text-gray-700">每日比例（中1:白）</div>
+        <div className="flex items-center gap-2">
+          <span>1 :</span>
+          <input
+            type="number"
+            step="0.05"
+            min="0"
+            max="3"
+            className="w-24 border rounded px-2 py-1"
+            value={rMin}
+            onChange={(e) => setRMin(Math.max(0, Math.min(3, parseFloat(e.target.value || '0'))))}
+          />
+          <span>~</span>
+          <input
+            type="number"
+            step="0.05"
+            min="0"
+            max="3"
+            className="w-24 border rounded px-2 py-1"
+            value={rMax}
+            onChange={(e) => setRMax(Math.max(0, Math.min(3, parseFloat(e.target.value || '0'))))}
+          />
+          <span className="text-gray-400">（示例：1:0.4~0.6）</span>
+        </div>
+      </div>
+      <div className="space-y-2">
+        <div className="font-medium text-gray-700">个人比例（中1:白）</div>
+        <div className="flex items-center gap-2">
+          <span>1 :</span>
+          <input
+            type="number"
+            step="0.05"
+            min="0"
+            max="3"
+            className="w-24 border rounded px-2 py-1"
+            value={pMin}
+            onChange={(e) => setPMin(Math.max(0, Math.min(3, parseFloat(e.target.value || '0'))))}
+          />
+          <span>~</span>
+          <input
+            type="number"
+            step="0.05"
+            min="0"
+            max="3"
+            className="w-24 border rounded px-2 py-1"
+            value={pMax}
+            onChange={(e) => setPMax(Math.max(0, Math.min(3, parseFloat(e.target.value || '0'))))}
+          />
+          <span className="text-gray-400">（示例：1:0.4~0.6）</span>
+        </div>
+      </div>
+    </div>
+    <div className="space-y-2">
+      <div className="font-medium text-gray-700">混合周期上限（比例）</div>
+      <div className="flex items-center gap-2 text-sm">
+        <span>混合周期 ≤ 总周期 ×</span>
+        <input
+          type="number"
+          step="0.05"
+          min="0"
+          max="1"
+          className="w-24 border rounded px-2 py-1"
+          value={mixMax}
+          onChange={(e) => setMixMax(Math.max(0, Math.min(1, parseFloat(e.target.value || '0'))))}
+        />
+        <span className="text-gray-400">（例如：0.5 表示有白且有中的周期不超过一半）</span>
+      </div>
+    </div>
+
+    <div className="flex flex-wrap items-center gap-3">
+      <PillBtn color="indigo" onClick={onRunMainRule} disabled={progRunning}>
+        开始自动排班
+      </PillBtn>
+    </div>
+
+    <div className="text-xs text-gray-500">
+      规则说明：① 全程禁止生成“中1→白”相邻；② 严格遵守最多 6 天连续上班；③ 混合周期（白+中1 同在一周期）不超过设定比例；④ 夜/中2 不参与本算法但保留；⑤ 多轮“按天→按人”收敛，优先确保你的目标约束而非速度。
+    </div>
+  </div>
+);
+
+// 夜班辅助工具面板
+const NightPanel = ({
+  nightWindows,
+  setNightWindows,
+  nightOverride,
+  setNightOverride,
+  nightRules,
+  setNightRules,
+  start,
+  end,
+  onAssignNight,
+  editingLocked,
+  hasSelection,
+}) => (
+  <div className="bg-white rounded-xl border p-3">
+    <h4 className="font-medium mb-2">夜班窗口（每天尽量有 夜 + 中2）</h4>
+    <div className="space-y-2">
+      {nightWindows.map((win, idx) => (
+        <div key={idx} className="flex flex-wrap items-end gap-2">
+          <label className="text-sm">
+            开始
+            <input
+              type="date"
+              value={win.s}
+              onChange={(e) =>
+                setNightWindows((arr) => {
+                  const next = [...arr];
+                  next[idx] = { ...next[idx], s: e.target.value };
+                  return next;
+                })
+              }
+              className="border rounded px-2 py-1 ml-1"
+            />
+          </label>
+          <label className="text-sm">
+            结束
+            <input
+              type="date"
+              value={win.e}
+              onChange={(e) =>
+                setNightWindows((arr) => {
+                  const next = [...arr];
+                  next[idx] = { ...next[idx], e: e.target.value };
+                  return next;
+                })
+              }
+              className="border rounded px-2 py-1 ml-1"
+            />
+          </label>
+          <button className="px-2 py-1 border rounded" onClick={() => setNightWindows((arr) => arr.filter((_, i) => i !== idx))}>
+            删除
+          </button>
+        </div>
+      ))}
+      <button className="px-3 py-1.5 border rounded" onClick={() => setNightWindows((arr) => [...arr, { s: start, e: end }])}>
+        新增一段
+      </button>
+    </div>
+
+    <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+      <label className="inline-flex items-center gap-2">
+        <input type="checkbox" checked={nightOverride} onChange={(e) => setNightOverride(e.target.checked)} /> 应用夜/中2时允许覆盖现有班次
+      </label>
+      <label className="inline-flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={nightRules.prioritizeInterval}
+          onChange={(e) => setNightRules((prev) => ({ ...prev, prioritizeInterval: e.target.checked }))}
+        />
+        夜班按间隔优先分配
+      </label>
+      <label className="inline-flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={nightRules.restAfterNight}
+          onChange={(e) => setNightRules((prev) => ({ ...prev, restAfterNight: e.target.checked }))}
+        />
+        夜班后休息 2 天
+      </label>
+      <label className="inline-flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={nightRules.enforceRestCap}
+          onChange={(e) => setNightRules((prev) => ({ ...prev, enforceRestCap: e.target.checked }))}
+        />
+        夜后休息不超过 2 天
+      </label>
+      <label className="inline-flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={nightRules.restAfterMid2}
+          onChange={(e) => setNightRules((prev) => ({ ...prev, restAfterMid2: e.target.checked }))}
+        />
+        中2 后休息 2 天
+      </label>
+      <label className="inline-flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={nightRules.allowDoubleMid2}
+          onChange={(e) => setNightRules((prev) => ({ ...prev, allowDoubleMid2: e.target.checked }))}
+        />
+        允许连续 2 个中2
+      </label>
+      <label className="inline-flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={nightRules.allowNightDay4}
+          onChange={(e) => setNightRules((prev) => ({ ...prev, allowNightDay4: e.target.checked }))}
+        />
+        支持周期第 4 天排夜班
+      </label>
+    </div>
+
+    <div className="flex flex-wrap items-center gap-3 mt-3 text-sm">
+      <PillBtn
+        color="emerald"
+        onClick={onAssignNight}
+        title={!hasSelection ? '请先勾选人员' : editingLocked ? '执行中：只读' : ''}
+      >
+        AI 一键分配 夜/中2（按窗口，多段）
+      </PillBtn>
+      <span className="text-xs text-gray-500">规则：夜后两天必须休；夜后两天禁止该员工中2；中2后一天强制休。</span>
+    </div>
+  </div>
+);
+
+// 自动排班组合面板，整合人员选择 + 规则 + 夜班工具
+const BatchAssignSection = ({
+  employees,
+  batchChecked,
+  setBatchChecked,
+  editingLocked,
+  progRunning,
+  rMin,
+  rMax,
+  pMin,
+  pMax,
+  mixMax,
+  setRMin,
+  setRMax,
+  setPMin,
+  setPMax,
+  setMixMax,
+  nightWindows,
+  setNightWindows,
+  nightOverride,
+  setNightOverride,
+  nightRules,
+  setNightRules,
+  start,
+  end,
+  onRunMainRule,
+  onAssignNight,
+  hasSelection,
+}) => (
+  <Section
+    title="自动分配班次"
+    right={
+      editingLocked ? (
+        <span className="text-rose-600 text-sm inline-flex items-center gap-1">
+          <Icon name="lock" />执行中：只读浏览
+        </span>
+      ) : null
+    }
+  >
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
+      <div className="lg:col-span-1">
+        <h3 className="font-medium mb-2">选择人员</h3>
+        <EmployeeChecklist
+          employees={employees}
+          batchChecked={batchChecked}
+          setBatchChecked={setBatchChecked}
+          editingLocked={editingLocked}
+        />
+      </div>
+      <div className="lg:col-span-2 space-y-4">
+        <MainRulePanel
+          rMin={rMin}
+          rMax={rMax}
+          pMin={pMin}
+          pMax={pMax}
+          mixMax={mixMax}
+          setRMin={setRMin}
+          setRMax={setRMax}
+          setPMin={setPMin}
+          setPMax={setPMax}
+          setMixMax={setMixMax}
+          progRunning={progRunning}
+          onRunMainRule={onRunMainRule}
+        />
+        <NightPanel
+          nightWindows={nightWindows}
+          setNightWindows={setNightWindows}
+          nightOverride={nightOverride}
+          setNightOverride={setNightOverride}
+          nightRules={nightRules}
+          setNightRules={setNightRules}
+          start={start}
+          end={end}
+          onAssignNight={onAssignNight}
+          editingLocked={editingLocked}
+          hasSelection={hasSelection}
+        />
+      </div>
+    </div>
+  </Section>
+);
+
+// 排班主表格组件：负责单元格输入、快捷粘贴与班次选择器
+const ScheduleGridSection = ({
+  employees = [],
+  dateList = [],
+  data = {},
+  setData,
+  editingLocked = false,
+  shiftColors = {},
+  shiftOptions = [],
+  adminDays = 0,
+  gridEmpCounts = {},
+  staffingAlerts = {},
+  styleForStaffing = () => ({}),
+  nightIssues = {},
+  dailyStats = {},
+  dow = (day) => new Date(day).getDay(),
+  WN = ['日', '一', '二', '三', '四', '五', '六'],
+}) => {
+  const activeCellRef = useRef(null);
+  const [picker, setPicker] = useState({ open: false, di: null, ei: null, x: 0, y: 0 });
+  const pickerRef = useRef(null);
+
+  useEffect(() => {
+    const handleMouseDown = (ev) => {
+      if (!picker.open) return;
+      if (pickerRef.current && !pickerRef.current.contains(ev.target)) {
+        setPicker((prev) => ({ ...prev, open: false }));
+      }
+    };
+    document.addEventListener('mousedown', handleMouseDown);
+    return () => document.removeEventListener('mousedown', handleMouseDown);
+  }, [picker.open]);
+
+  const setCellByIndex = (di, ei, value) => {
+    const day = dateList[di];
+    const emp = employees[ei];
+    if (!day || !emp || typeof setData !== 'function') return;
+    setData((prev) => {
+      const next = { ...prev };
+      const row = { ...(next[day] || {}) };
+      row[emp] = value;
+      next[day] = row;
+      return next;
+    });
+  };
+
+  const moveActive = (dx, dy) => {
+    const cur = activeCellRef.current || { dIndex: 0, eIndex: 0 };
+    const ni = Math.max(0, Math.min((cur.dIndex || 0) + dy, dateList.length - 1));
+    const nj = Math.max(0, Math.min((cur.eIndex || 0) + dx, employees.length - 1));
+    activeCellRef.current = { dIndex: ni, eIndex: nj };
+    const el = document.getElementById(`cell-${ni}-${nj}`);
+    if (el) el.focus();
+  };
+
+  const openPickerAt = (di, ei, anchorEl) => {
+    if (editingLocked) return;
+    const el = anchorEl || document.getElementById(`cell-${di}-${ei}`);
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    setPicker({
+      open: true,
+      di,
+      ei,
+      x: rect.left + window.scrollX,
+      y: rect.bottom + window.scrollY + 4,
+    });
+  };
+
+  const onKeyDownCell = (e, di, ei) => {
+    if (e.isComposing) return;
+    if (e.altKey && (e.key === 'ArrowDown' || e.key === 'Enter')) {
+      e.preventDefault();
+      openPickerAt(di, ei, e.currentTarget);
+      return;
+    }
+    if (e.key === 'Enter' || e.key === 'ArrowRight') {
+      e.preventDefault();
+      moveActive(1, 0);
+    } else if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      moveActive(-1, 0);
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      moveActive(0, 1);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      moveActive(0, -1);
+    }
+  };
+
+  return (
+    <>
+      <Section
+        title="排班表格"
+        right={
+          <span className="text-sm text-gray-500">
+            提示：点击单元格→直接输入或从 Excel 粘贴；支持 IME 连续输入{' '}
+            {editingLocked && (
+              <span className="inline-flex items-center gap-1 text-rose-600 ml-2">
+                <Icon name="lock" />执行中：只读
+              </span>
+            )}
+          </span>
+        }
+      >
+        {employees.length === 0 ? (
+          <div className="text-sm text-gray-500">请先在「员工管理」中添加员工。</div>
+        ) : (
+          <>
+            <div
+              className="grid-wrap border rounded-xl shadow-inner"
+              onPaste={(e) => {
+                if (editingLocked) return;
+                const cur = activeCellRef.current;
+                if (!cur) return;
+                const text = e.clipboardData.getData('text');
+                if (!text) return;
+                e.preventDefault();
+                const rows = text
+                  .replace(/\r/g, '')
+                  .split('\n')
+                  .filter((x) => x.length > 0)
+                  .map((r) => r.split(/\t|,/));
+                const baseI = cur.eIndex;
+                const baseD = cur.dIndex;
+                if (typeof setData !== 'function') return;
+                setData((prev) => {
+                  const next = { ...prev };
+                  for (let r = 0; r < rows.length; r++) {
+                    const day = dateList[baseD + r];
+                    if (!day) break;
+                    const row = { ...(next[day] || {}) };
+                    for (let c = 0; c < rows[r].length; c++) {
+                      const emp = employees[baseI + c];
+                      if (!emp) break;
+                      row[emp] = rows[r][c];
+                    }
+                    next[day] = row;
+                  }
+                  return next;
+                });
+              }}
+            >
+              <table className="min-w-max text-sm w-full">
+                <thead>
+                  <tr className="bg-gray-50">
+                    <th className="sticky py-2 px-3 text-left left-sticky" style={{ minWidth: '8.5rem' }}>
+                      日期
+                    </th>
+                    <th className="sticky py-2 px-3 text-left left-sticky-2" style={{ minWidth: '6.5rem' }}>
+                      星期
+                    </th>
+                    <th className="sticky py-2 px-3 text-left left-sticky-3" style={{ minWidth: '9rem' }}>
+                      问题
+                    </th>
+                    {employees.map((name) => {
+                      const diff = (gridEmpCounts[name]?.总 || 0) - Number(adminDays || 0);
+                      const diffCls =
+                        diff === 0
+                          ? 'bg-gray-100 text-gray-700'
+                          : diff > 0
+                          ? 'bg-emerald-100 text-emerald-700'
+                          : 'bg-rose-100 text-rose-700';
+                      return (
+                        <th key={name} className="sticky py-2 px-3 text-left">
+                          <div className="flex items-center gap-2">
+                            <span>{name}</span>
+                            <span className={`badge ${diffCls}`} title="差值=实际总天数-行政班应上天数">
+                              {diff > 0 ? `+${diff}` : diff}
+                            </span>
+                          </div>
+                        </th>
+                      );
+                    })}
+                  </tr>
+                </thead>
+                <tbody>
+                  {dateList.map((day, di) => {
+                    const weekday = dow(day);
+                    const weekend = weekday === 0 || weekday === 6;
+                    const row = data[day] || {};
+                    const issue = nightIssues[day] || '';
+                    const stat = dailyStats[day] || { 总: 0, 白: 0, 中1: 0, 中2: 0, 夜: 0 };
+                    return (
+                      <tr key={day} className={`border-t hover:bg-indigo-50/30 ${weekend ? 'bg-gray-50' : ''}`}>
+                        <td className="py-1.5 px-3 font-medium text-gray-800 left-sticky" style={{ minWidth: '8.5rem' }}>
+                          <div className="flex items-center gap-2">
+                            <span>{day}</span>
+                          </div>
+                          <div className="text-xs text-gray-500 flex flex-wrap items-center gap-1">
+                            <span style={styleForStaffing(stat['总'], staffingAlerts.total)}>在岗 {stat['总']}</span>
+                            <span>（</span>
+                            <span style={styleForStaffing(stat['白'], staffingAlerts.white)}>白 {stat['白']}</span>
+                            <span>/</span>
+                            <span style={styleForStaffing(stat['中1'], staffingAlerts.mid1)}>中1 {stat['中1']}</span>
+                            <span>/</span>
+                            <span style={styleForStaffing(stat['中2'], staffingAlerts.mid2)}>中2 {stat['中2']}</span>
+                            <span>/</span>
+                            <span style={styleForStaffing(stat['夜'], staffingAlerts.night)}>夜 {stat['夜']}</span>
+                            <span>）</span>
+                          </div>
+                        </td>
+                        <td className="py-1.5 px-3 text-gray-500 left-sticky-2" style={{ minWidth: '6.5rem' }}>
+                          周{WN[weekday] ?? weekday}
+                        </td>
+                        <td className="py-1.5 px-3 left-sticky-3" style={{ minWidth: '9rem' }}>
+                          {issue ? (
+                            <span
+                              className={`badge ${
+                                issue === '缺夜&中2'
+                                  ? 'bg-red-100 text-red-700'
+                                  : 'bg-amber-100 text-amber-700'
+                              }`}
+                            >
+                              {issue}
+                            </span>
+                          ) : (
+                            <span className="text-gray-400">—</span>
+                          )}
+                        </td>
+                        {employees.map((emp, ei) => {
+                          const value = (row && row[emp]) || '';
+                          const bg = shiftColors[value] || undefined;
+                          return (
+                            <td key={emp} className="py-1.5 px-3">
+                              <div className="cell-wrap">
+                                <input
+                                  list="shift-options"
+                                  id={`cell-${di}-${ei}`}
+                                  className="cell border rounded-lg px-2 py-1.5 focus:ring-2 focus:ring-indigo-300 focus:outline-none transition disabled:bg-gray-100"
+                                  style={{ backgroundColor: bg }}
+                                  value={value}
+                                  disabled={editingLocked}
+                                  title={editingLocked ? '执行中：只读' : ''}
+                                  onFocus={() => {
+                                    activeCellRef.current = { dIndex: di, eIndex: ei };
+                                  }}
+                                  onKeyDown={(ev) => onKeyDownCell(ev, di, ei)}
+                                  onCompositionStart={(ev) => {
+                                    ev.target.isComposing = true;
+                                  }}
+                                  onCompositionEnd={(ev) => {
+                                    ev.target.isComposing = false;
+                                    setCellByIndex(di, ei, ev.currentTarget.value);
+                                  }}
+                                  onChange={(ev) => setCellByIndex(di, ei, ev.target.value)}
+                                  onDoubleClick={(ev) => {
+                                    if (editingLocked) return;
+                                    openPickerAt(di, ei, ev.currentTarget);
+                                  }}
+                                  placeholder="白/中1/中2/夜/休 或留空"
+                                />
+                                <button
+                                  className="cell-toggle"
+                                  disabled={editingLocked}
+                                  aria-label="选择班次"
+                                  title="选择班次"
+                                  onClick={(ev) => {
+                                    ev.preventDefault();
+                                    ev.stopPropagation();
+                                    openPickerAt(di, ei);
+                                  }}
+                                >
+                                  <span className="sr-only">打开班次选择器</span>
+                                </button>
+                              </div>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <datalist id="shift-options">
+                {shiftOptions.map((item) => (
+                  <option key={item} value={item} />
+                ))}
+              </datalist>
+            </div>
+          </>
+        )}
+      </Section>
+
+      {picker.open && (
+        <div className="fixed z-50" style={{ left: picker.x, top: picker.y }}>
+          <div ref={pickerRef} className="picker bg-white border rounded-xl p-1 w-40">
+            {shiftOptions.map((item) => (
+              <button
+                key={item}
+                className="w-full text-left px-3 py-2 rounded hover:bg-gray-100"
+                onClick={() => {
+                  setCellByIndex(picker.di, picker.ei, item);
+                  setPicker((prev) => ({ ...prev, open: false }));
+                }}
+              >
+                {item}
+              </button>
+            ))}
+            <div className="h-px bg-gray-100 my-1"></div>
+            <button
+              className="w-full text-left px-3 py-2 rounded hover:bg-gray-100"
+              onClick={() => {
+                setCellByIndex(picker.di, picker.ei, '');
+                setPicker((prev) => ({ ...prev, open: false }));
+              }}
+            >
+              清空
+            </button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+};
+
+// 月份输入框：支持键盘输入自动格式化
+const MonthInput = React.memo(function MonthInputComponent({
+  value,
+  onChange,
+  disabled = false,
+  className = '',
+  placeholder = 'YYYY-MM'
+}) {
+  const [draft, setDraft] = useState(() => value || '');
+  useEffect(() => {
+    setDraft(value || '');
+  }, [value]);
+
+  const format = (raw) => {
+    const digits = String(raw || '').replace(/[^0-9]/g, '');
+    let next = digits.slice(0, 4);
+    if (digits.length > 4) {
+      next += '-' + digits.slice(4, 6);
+    }
+    return next;
+  };
+
+  const commit = (input) => {
+    if (!onChange) return;
+    if (!input) {
+      onChange('');
+      return;
+    }
+    const match = input.match(/^(\d{4})(?:-(\d{1,2}))?$/);
+    if (!match) {
+      onChange(value || '');
+      return;
+    }
+    const year = match[1];
+    const monthRaw = match[2] ?? '';
+    const monthNum = monthRaw ? parseInt(monthRaw, 10) : NaN;
+    const month = Number.isFinite(monthNum) ? Math.min(12, Math.max(1, monthNum)) : 1;
+    const normalized = `${year}-${String(month).padStart(2, '0')}`;
+    onChange(normalized);
+    setDraft(normalized);
+  };
+
+  const handleChange = (e) => {
+    if (disabled) return;
+    const formatted = format(e.target.value);
+    setDraft(formatted);
+    if (formatted.length >= 7) {
+      commit(formatted);
+    } else if (formatted === '') {
+      if (onChange) onChange('');
+    }
+  };
+
+  const handleBlur = () => {
+    if (disabled) return;
+    if (!draft) {
+      if (onChange) onChange('');
+      return;
+    }
+    commit(draft);
+  };
+
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      pattern="\d{4}-\d{2}"
+      className={className}
+      value={draft}
+      placeholder={placeholder}
+      disabled={disabled}
+      onChange={handleChange}
+      onBlur={handleBlur}
+    />
+  );
+});
+
+// 历史版本列表：展示保存的版本并提供载入 / 删除操作
+const HistorySection = ({
+  teamDisplayName,
+  versions,
+  versionsLoading,
+  editingLocked,
+  versionDeletingId,
+  onRefresh,
+  onLoadVersion,
+  onDeleteVersion,
+}) => (
+  <Section
+    title={`历史版本（${teamDisplayName || '未命名团队'}）`}
+    right={
+      <button
+        onClick={onRefresh}
+        className={`px-3 py-1.5 rounded-full text-sm text-white transition ${
+          editingLocked || versionsLoading ? 'bg-gray-300 cursor-not-allowed' : 'bg-gray-800 hover:bg-gray-700'
+        }`}
+        disabled={editingLocked || versionsLoading}
+      >
+        {versionsLoading ? (
+          <span className="flex items-center gap-2">
+            <Spinner className="w-4 h-4 text-white" />
+            <span>刷新中…</span>
+          </span>
+        ) : (
+          '刷新列表'
+        )}
+      </button>
+    }
+  >
+    {versionsLoading && versions.length > 0 && (
+      <div className="flex items-center gap-2 text-xs text-gray-500 mb-3">
+        <Spinner className="w-4 h-4 text-indigo-500" />
+        <span>正在刷新历史版本，请稍候…</span>
+      </div>
+    )}
+    {versionsLoading && versions.length === 0 ? (
+      <div className="text-sm text-gray-500">正在加载历史版本…</div>
+    ) : versions.length === 0 ? (
+      <p className="text-sm text-gray-500">
+        当前团队「{teamDisplayName || '未命名团队'}」暂无历史版本，请在“设置 / 导出”页保存新版本或稍后刷新。
+      </p>
+    ) : (
+      <div className="overflow-auto max-h-64">
+        <table className="text-sm w-full min-w-[780px]">
+          <thead className="bg-gray-50 text-gray-500">
+            <tr>
+              <th className="text-left py-2 px-3">版本名</th>
+              <th className="text-left py-2 px-3">团队</th>
+              <th className="text-left py-2 px-3">版本ID</th>
+              <th className="text-left py-2 px-3">保存时间</th>
+              <th className="text-left py-2 px-3">操作用户</th>
+              <th className="text-left py-2 px-3">备注</th>
+              <th className="text-left py-2 px-3">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {versions.map((entry) => {
+              const name = entry.note || entry.name || '';
+              const remark = entry.remark || entry.description || '';
+              const teamName = entry.team_name || entry.teamName || teamDisplayName || '—';
+              const createdAt = entry.created_at || entry.createdAt || '—';
+              const operator = entry.created_by_name || entry.created_by || '管理员';
+              const deleting = versionDeletingId === entry.id;
+              return (
+                <tr key={entry.id} className="border-t hover:bg-gray-50">
+                  <td className="py-1 px-3">
+                    <div className="font-medium text-gray-900">{name || '（未命名）'}</div>
+                  </td>
+                  <td className="py-1 px-3 text-gray-600">{teamName}</td>
+                  <td className="py-1 px-3 text-gray-600">{entry.id}</td>
+                  <td className="py-1 px-3 text-gray-600">{createdAt}</td>
+                  <td className="py-1 px-3 text-gray-600">{operator}</td>
+                  <td className="py-1 px-3 text-gray-600">{remark || '—'}</td>
+                  <td className="py-1 px-3">
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        className="text-indigo-600 hover:underline disabled:text-gray-400 disabled:no-underline"
+                        onClick={() => onLoadVersion(entry.id)}
+                        disabled={versionsLoading || deleting}
+                      >
+                        载入
+                      </button>
+                      <button
+                        type="button"
+                        className="flex items-center gap-1 text-rose-600 hover:underline disabled:text-rose-300 disabled:no-underline"
+                        onClick={() => onDeleteVersion(entry.id)}
+                        disabled={deleting || versionsLoading}
+                      >
+                        {deleting ? (
+                          <>
+                            <Spinner className="w-3.5 h-3.5 text-rose-500" />
+                            <span>删除中</span>
+                          </>
+                        ) : (
+                          '删除'
+                        )}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    )}
+  </Section>
+);
+
+// 设置面板：包含备注、导出、颜色与提醒阈值等配置
+const SettingsSection = ({
+  note,
+  editingLocked,
+  onNoteChange,
+  onSave,
+  onExport,
+  yearlyOptimize,
+  onToggleYearlyOptimize,
+  scheduleYearLabel,
+  shiftColors,
+  onChangeShiftColor,
+  onResetShiftColors,
+  staffingAlerts,
+  onAlertThresholdChange,
+  onAlertLowColorChange,
+  onAlertHighColorChange,
+  onResetAlerts,
+}) => (
+  <Section title="设置 / 导出">
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div>
+        <label className="block text-sm text-gray-600 mb-1">保存备注</label>
+        <input
+          className={`w-full border rounded px-3 py-2 ${editingLocked ? 'bg-gray-100' : ''}`}
+          value={note}
+          onCompositionEnd={(e) => onNoteChange && onNoteChange(e.target.value)}
+          onChange={(e) => onNoteChange && onNoteChange(e.target.value)}
+          placeholder="例如：10月第一版"
+          disabled={editingLocked}
+        />
+      </div>
+      <div className="flex flex-wrap items-end gap-2">
+        <PillBtn onClick={onSave} color="emerald" disabled={editingLocked} title={editingLocked ? '执行中：只读' : ''}>
+          保存新版本
+        </PillBtn>
+        <PillBtn onClick={onExport} color="sky" disabled={editingLocked} title={editingLocked ? '执行中：只读' : ''}>
+          服务器导出 Excel/CSV
+        </PillBtn>
+      </div>
+    </div>
+    <div className="mt-6">
+      <h3 className="font-semibold mb-2">自动排班优化</h3>
+      <label className={`flex items-start gap-3 text-sm ${editingLocked ? 'opacity-60' : ''}`}>
+        <input
+          type="checkbox"
+          className="mt-1"
+          checked={!!yearlyOptimize}
+          onChange={(e) => onToggleYearlyOptimize && onToggleYearlyOptimize(e.target.checked)}
+          disabled={editingLocked}
+        />
+        <span>
+          <span className="font-medium text-gray-700">按当年累计班次优化</span>
+          <span className="block text-xs text-gray-500 mt-1">
+            开启后，自动排班会参考 {scheduleYearLabel} 年 1 月至排班开始日前的历史安排，延续休息日并均衡全年班次占比。
+          </span>
+        </span>
+      </label>
+    </div>
+    <div className="mt-6">
+      <h3 className="font-semibold mb-2">班次颜色（同步保存到浏览器）</h3>
+      <div className="flex flex-wrap gap-4 items-center text-sm">
+        {['白', '中1', '中2', '夜', '休'].map((shift) => (
+          <label key={shift} className={`flex items-center gap-2 ${editingLocked ? 'opacity-60' : ''}`}>
+            <span className="w-10 text-right">{shift}</span>
+            <input
+              type="color"
+              disabled={editingLocked}
+              value={shiftColors?.[shift] || '#ffffff'}
+              onChange={(e) => onChangeShiftColor && onChangeShiftColor(shift, e.target.value)}
+            />
+          </label>
+        ))}
+        <button
+          className={`px-3 py-1.5 rounded ${editingLocked ? 'bg-gray-200 cursor-not-allowed' : 'bg-gray-100 hover:bg-gray-200'}`}
+          disabled={editingLocked}
+          onClick={() => onResetShiftColors && onResetShiftColors()}
+        >
+          恢复默认
+        </button>
+      </div>
+    </div>
+    <div className="mt-6 space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="font-semibold">在岗人数提醒颜色</h3>
+        <button
+          className={`text-xs px-2 py-1 rounded ${editingLocked ? 'bg-gray-200 cursor-not-allowed' : 'bg-gray-100 hover:bg-gray-200'}`}
+          disabled={editingLocked}
+          onClick={() => onResetAlerts && onResetAlerts()}
+        >
+          恢复默认
+        </button>
+      </div>
+      <div className="text-xs text-gray-500">
+        可自定义排班表中「在岗 / 白 / 中1」统计的颜色提示。例如当中1 ≤ 3 时给出醒目颜色。
+      </div>
+      <div className="space-y-3">
+        {[
+          { key: 'total', label: '在岗总人数' },
+          { key: 'white', label: '白班人数' },
+          { key: 'mid1', label: '中1人数' },
+        ].map((item) => {
+          const conf = staffingAlerts?.[item.key] || {};
+          return (
+            <div
+              key={item.key}
+              className={`grid grid-cols-1 md:grid-cols-[180px_1fr] gap-3 items-center text-sm ${editingLocked ? 'opacity-70' : ''}`}
+            >
+              <div className="font-medium text-gray-700">{item.label}</div>
+              <div className="grid grid-cols-1 md:grid-cols-[auto_auto_auto_auto] gap-2 items-center">
+                <span className="text-xs text-gray-500">≤</span>
+                <input
+                  type="number"
+                  className="w-20 border rounded px-2 py-1"
+                  value={conf.threshold ?? 0}
+                  disabled={editingLocked}
+                  onChange={(e) =>
+                    onAlertThresholdChange &&
+                    onAlertThresholdChange(item.key, Number(e.target.value || 0))
+                  }
+                />
+                <input
+                  type="color"
+                  className="w-16"
+                  disabled={editingLocked}
+                  value={conf.lowColor || '#ffffff'}
+                  onChange={(e) =>
+                    onAlertLowColorChange && onAlertLowColorChange(item.key, e.target.value)
+                  }
+                />
+                <div className="flex items-center gap-2 text-xs text-gray-500">
+                  <span>大于阈值</span>
+                  <input
+                    type="color"
+                    className="w-16"
+                    disabled={editingLocked}
+                    value={conf.highColor || '#ffffff'}
+                    onChange={(e) =>
+                      onAlertHighColorChange && onAlertHighColorChange(item.key, e.target.value)
+                    }
+                  />
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  </Section>
+);
+
+// 专辑审核人员勾选列表，提供搜索与批量操作
+const AlbumEmployeeChecklist = ({
+  employees = [],
+  albumSelected = {},
+  albumCheckedList = [],
+  editingLocked = false,
+  onToggle,
+  onSelectAll,
+  onSelectInverse,
+  onSelectClear,
+}) => {
+  const [kw, setKw] = useState('');
+  const filtered = useMemo(() => {
+    const keyword = kw.trim().toLowerCase();
+    if (!keyword) return employees;
+    return employees.filter((name) => name.toLowerCase().includes(keyword));
+  }, [kw, employees]);
+  const listRef = useRef(null);
+  const withStay = (cb) => {
+    const el = listRef.current;
+    const top = el ? el.scrollTop : 0;
+    const left = el ? el.scrollLeft : 0;
+    cb();
+    requestAnimationFrame(() => {
+      const node = listRef.current;
+      if (node) {
+        node.scrollTop = top;
+        node.scrollLeft = left;
+      }
+    });
+  };
+  const selectedCount = useMemo(
+    () => filtered.filter((name) => !!albumSelected?.[name]).length,
+    [filtered, albumSelected],
+  );
+  return (
+    <div className="rounded-2xl border bg-gradient-to-br from-white via-white to-indigo-50/40 p-3">
+      <div className="flex items-center gap-2 mb-2">
+        <input
+          className="border rounded px-2 py-1 text-sm flex-1"
+          placeholder="搜索姓名…"
+          value={kw}
+          onChange={(e) => setKw(e.target.value)}
+        />
+        <span className="text-xs text-gray-500 whitespace-nowrap">
+          已选 {albumCheckedList.length} / {employees.length}
+        </span>
+      </div>
+      <div className="flex items-center justify-between text-xs text-gray-600 mb-2">
+        <div>
+          当前筛选：{filtered.length} 人；选中 {selectedCount} 人
+        </div>
+        <div className="space-x-1">
+          <button
+            className={`px-2 py-1 rounded border text-xs ${editingLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
+            disabled={editingLocked}
+            onClick={() => withStay(() => onSelectAll && onSelectAll(filtered))}
+          >
+            全选
+          </button>
+          <button
+            className={`px-2 py-1 rounded border text-xs ${editingLocked || filtered.length === 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
+            disabled={editingLocked || filtered.length === 0}
+            onClick={() => withStay(() => onSelectInverse && onSelectInverse(filtered))}
+          >
+            反选
+          </button>
+          <button
+            className={`px-2 py-1 rounded border text-xs ${editingLocked || filtered.length === 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
+            disabled={editingLocked || filtered.length === 0}
+            onClick={() => withStay(() => onSelectClear && onSelectClear(filtered))}
+          >
+            清空
+          </button>
+        </div>
+      </div>
+      <div ref={listRef} className="max-h-64 overflow-auto divide-y">
+        {filtered.map((name) => (
+          <label key={name} className="flex items-center gap-2 py-1 text-sm">
+            <input
+              type="checkbox"
+              checked={!!albumSelected?.[name]}
+              disabled={editingLocked}
+              onChange={() => withStay(() => onToggle && onToggle(name))}
+            />
+            <span>{name}</span>
+          </label>
+        ))}
+        {filtered.length === 0 && (
+          <div className="text-xs text-gray-400 py-3 text-center">未找到匹配人员</div>
+        )}
+      </div>
+      <div className="mt-3 text-xs text-gray-500 bg-indigo-50/50 rounded-xl px-3 py-2">
+        勾选后的人员将参与专辑审核排班与统计；未选择偏好时不会进入预测与自动分配。
+      </div>
+    </div>
+  );
+};
+
+// 专辑审核主视图，负责展示参数、排班表与统计
+const AlbumSection = ({
+  employees = [],
+  albumSelected = {},
+  albumCheckedList = [],
+  editingLocked = false,
+  onToggleEmployee,
+  onSelectAllEmployees,
+  onSelectInverseEmployees,
+  onClearSelectedEmployees,
+  albumRangeStartMonth,
+  albumRangeEndMonth,
+  onChangeRangeStart,
+  onChangeRangeEnd,
+  albumWhiteHour = 0,
+  onChangeWhiteHour,
+  albumMidHour = 0,
+  onChangeMidHour,
+  albumMaxDiff = 0,
+  onChangeMaxDiff,
+  autoAssignAlbum,
+  albumAutoNote,
+  albumRange,
+  albumDates = [],
+  confirmAlbumPlan,
+  exportAlbumPlan,
+  albumAssignments = {},
+  updateAlbumAssignment,
+  data = {},
+  shiftColors = {},
+  albumStats = [],
+  albumTotals = { whiteDays: 0, midDays: 0, whiteHours: 0, midHours: 0, totalHours: 0 },
+  albumDiff = 0,
+  albumCoverage = { totalDays: 0, whiteAssigned: 0, midAssigned: 0 },
+  WN = [],
+}) => {
+  const safeDates = Array.isArray(albumDates) ? albumDates : [];
+  const safeChecked = Array.isArray(albumCheckedList) ? albumCheckedList : [];
+  const safeStats = Array.isArray(albumStats) ? albumStats : [];
+  const coverage = albumCoverage || { totalDays: 0, whiteAssigned: 0, midAssigned: 0 };
+  const totals = albumTotals || { whiteDays: 0, midDays: 0, whiteHours: 0, midHours: 0, totalHours: 0 };
+  const handleAutoAssign = () => autoAssignAlbum && autoAssignAlbum();
+  const handleConfirm = () => confirmAlbumPlan && confirmAlbumPlan();
+  const handleExport = () => exportAlbumPlan && exportAlbumPlan();
+  const safeWN = Array.isArray(WN) && WN.length ? WN : ['日', '一', '二', '三', '四', '五', '六'];
+  return (
+    <Section
+      title="专辑审核自动排班"
+      right={<span className="text-xs text-gray-500">白班 1 人 + 中1 1 人，时长均衡的审核计划</span>}
+    >
+      <div className="grid grid-cols-1 xl:grid-cols-4 gap-4 items-start">
+        <div className="space-y-4">
+          <AlbumEmployeeChecklist
+            employees={employees}
+            albumSelected={albumSelected}
+            albumCheckedList={safeChecked}
+            editingLocked={editingLocked}
+            onToggle={onToggleEmployee}
+            onSelectAll={onSelectAllEmployees}
+            onSelectInverse={onSelectInverseEmployees}
+            onSelectClear={onClearSelectedEmployees}
+          />
+          <div className="rounded-2xl border bg-gradient-to-br from-white via-white to-amber-50/60 p-4 space-y-3">
+            <div className="flex items-center gap-2 text-sm font-medium text-amber-700">
+              <Icon name="magic" className="w-4 h-4" />自动排班参数
+            </div>
+            <div className="grid grid-cols-1 gap-2 text-sm text-gray-600">
+              <label className="flex items-center justify-between gap-2">
+                开始月份
+                <MonthInput
+                  className="border rounded px-2 py-1"
+                  value={albumRangeStartMonth}
+                  onChange={onChangeRangeStart}
+                  disabled={editingLocked}
+                />
+              </label>
+              <label className="flex items-center justify-between gap-2">
+                结束月份
+                <MonthInput
+                  className="border rounded px-2 py-1"
+                  value={albumRangeEndMonth}
+                  onChange={onChangeRangeEnd}
+                  disabled={editingLocked}
+                />
+              </label>
+              <label className="flex items-center justify-between gap-2">
+                白班时长（小时）
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  className="border rounded px-2 py-1 w-24 text-right"
+                  value={albumWhiteHour}
+                  onChange={(e) => onChangeWhiteHour && onChangeWhiteHour(Number.parseFloat(e.target.value || '0') || 0)}
+                />
+              </label>
+              <label className="flex items-center justify-between gap-2">
+                中1时长（小时）
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  className="border rounded px-2 py-1 w-24 text-right"
+                  value={albumMidHour}
+                  onChange={(e) => onChangeMidHour && onChangeMidHour(Number.parseFloat(e.target.value || '0') || 0)}
+                />
+              </label>
+              <label className="flex items-center justify-between gap-2">
+                允许时长差值 ±
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  className="border rounded px-2 py-1 w-24 text-right"
+                  value={albumMaxDiff}
+                  onChange={(e) =>
+                    onChangeMaxDiff &&
+                    onChangeMaxDiff(e.target.value === '' ? 0 : Number.parseFloat(e.target.value) || 0)
+                  }
+                />
+              </label>
+            </div>
+            <PillBtn
+              color="indigo"
+              onClick={handleAutoAssign}
+              disabled={editingLocked || safeChecked.length === 0 || safeDates.length === 0}
+              title={
+                safeChecked.length === 0
+                  ? '请先勾选人员'
+                  : safeDates.length === 0
+                  ? '请先设置有效月份范围'
+                  : editingLocked
+                  ? '执行中：只读'
+                  : ''
+              }
+            >
+              智能生成专辑审核排班
+            </PillBtn>
+            {albumAutoNote && (
+              <div className="text-xs text-indigo-600 bg-indigo-50/80 border border-indigo-100 rounded-xl px-3 py-2">
+                {albumAutoNote}
+              </div>
+            )}
+            <div className="text-xs text-gray-500">提示：参数调整后可重新生成；排班结果支持右侧表格内手动微调。</div>
+          </div>
+        </div>
+
+        <div className="space-y-4 xl:col-span-3">
+          <div className="rounded-2xl border bg-white/90 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-sm font-medium text-gray-700">
+              <div className="flex items-center gap-2">
+                <span>排班概览</span>
+                <span className="text-xs text-gray-400">
+                  {albumRange ? `${albumRange.start} ~ ${albumRange.end}` : '请选择排班月份范围'}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <PillBtn
+                  color="emerald"
+                  onClick={handleConfirm}
+                  disabled={editingLocked || !albumRange || safeDates.length === 0}
+                  title={
+                    editingLocked
+                      ? '执行中：只读'
+                      : !albumRange || safeDates.length === 0
+                      ? '请先设置有效的月份范围'
+                      : '确认排班并写入历史'
+                  }
+                >
+                  确认排班
+                </PillBtn>
+                <PillBtn
+                  color="gray"
+                  onClick={handleExport}
+                  disabled={safeDates.length === 0}
+                  title={safeDates.length === 0 ? '暂无可导出的排班数据' : '导出为 Excel'}
+                >
+                  导出 Excel
+                </PillBtn>
+              </div>
+            </div>
+            {albumRange ? (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-3 text-sm">
+                <div className="rounded-2xl border bg-gradient-to-br from-indigo-50 to-white px-3 py-2">
+                  <div className="text-xs text-gray-500">覆盖天数</div>
+                  <div className="text-lg font-semibold text-indigo-700">{coverage.totalDays}</div>
+                </div>
+                <div className="rounded-2xl border bg-gradient-to-br from-sky-50 to-white px-3 py-2">
+                  <div className="text-xs text-gray-500">白班已分配</div>
+                  <div className="text-lg font-semibold text-sky-600">
+                    {coverage.whiteAssigned}
+                    <span className="text-xs text-gray-500 ml-1">天</span>
+                  </div>
+                </div>
+                <div className="rounded-2xl border bg-gradient-to-br from-amber-50 to-white px-3 py-2">
+                  <div className="text-xs text-gray-500">中1已分配</div>
+                  <div className="text-lg font-semibold text-amber-600">
+                    {coverage.midAssigned}
+                    <span className="text-xs text-gray-500 ml-1">天</span>
+                  </div>
+                </div>
+                <div className="rounded-2xl border bg-gradient-to-br from-emerald-50 to-white px-3 py-2">
+                  <div className="text-xs text-gray-500">时长差值</div>
+                  <div
+                    className={`text-lg font-semibold ${
+                      albumDiff <= (Number.isFinite(albumMaxDiff) ? Math.max(0, albumMaxDiff) : albumDiff + 1)
+                        ? 'text-emerald-600'
+                        : 'text-rose-600'
+                    }`}
+                  >
+                    {albumDiff.toFixed(2)}
+                    <span className="text-xs text-gray-500 ml-1">小时</span>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="text-xs text-gray-500 mt-3">尚未设置有效范围，请在左侧选择月份。</div>
+            )}
+          </div>
+
+          <div className="rounded-2xl border bg-white overflow-hidden">
+            <div className="px-4 py-3 border-b bg-gray-50 text-sm font-medium text-gray-700 flex items-center justify-between">
+              <span>播单专辑审核排班表</span>
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-gray-400">支持手动微调，实时更新统计</span>
+                <button
+                  onClick={handleExport}
+                  disabled={safeDates.length === 0}
+                  className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                    safeDates.length === 0
+                      ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                      : 'bg-indigo-600 text-white hover:bg-indigo-500'
+                  }`}
+                >
+                  导出 Excel
+                </button>
+              </div>
+            </div>
+            {safeDates.length === 0 ? (
+              <div className="p-4 text-xs text-gray-500">请选择有效月份后再生成排班。</div>
+            ) : (
+              <div className="overflow-auto">
+                <table className="min-w-[520px] w-full text-sm">
+                  <thead className="bg-gray-50 text-gray-500">
+                    <tr>
+                      <th className="text-left py-2 px-3">日期</th>
+                      <th className="text-left py-2 px-3">星期</th>
+                      <th className="text-left py-2 px-3">白班审核人</th>
+                      <th className="text-left py-2 px-3">中班审核人</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {safeDates.map((day) => {
+                      const info = albumAssignments?.[day] || { white: '', mid: '' };
+                      const row = data?.[day] || {};
+                      const weekLabel = safeWN[new Date(day).getDay()] || '';
+                      const whiteCandidates = safeChecked.filter((emp) => (row[emp] || '') === '白');
+                      const midCandidates = safeChecked.filter((emp) => (row[emp] || '') === '中1');
+                      const whiteClass = `border rounded px-2 py-1 w-full text-sm transition-colors ${
+                        info.white ? 'bg-white border-gray-200 text-gray-700' : 'bg-rose-50 border-rose-200 text-rose-600'
+                      }`;
+                      const midClass = `border rounded px-2 py-1 w-full text-sm transition-colors ${
+                        info.mid ? 'bg-white border-gray-200 text-gray-700' : 'bg-rose-50 border-rose-200 text-rose-600'
+                      }`;
+                      return (
+                        <tr key={`album-${day}`} className="border-t hover:bg-indigo-50/20">
+                          <td className="py-1.5 px-3 font-medium text-gray-700">{day}</td>
+                          <td className="py-1.5 px-3 text-gray-500">周{weekLabel}</td>
+                          <td className="py-1.5 px-3">
+                            <select
+                              className={whiteClass}
+                              value={info.white || ''}
+                              onChange={(e) => updateAlbumAssignment && updateAlbumAssignment(day, 'white', e.target.value)}
+                              title={whiteCandidates.length === 0 ? '当日无白班可选' : '请选择白班审核人'}
+                            >
+                              <option value="">未分配</option>
+                              {whiteCandidates.map((emp) => (
+                                <option key={`${day}-${emp}-white`} value={emp}>
+                                  {emp}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                          <td className="py-1.5 px-3">
+                            <select
+                              className={midClass}
+                              value={info.mid || ''}
+                              onChange={(e) => updateAlbumAssignment && updateAlbumAssignment(day, 'mid', e.target.value)}
+                              title={midCandidates.length === 0 ? '当日无中1可选' : '请选择中班审核人'}
+                            >
+                              <option value="">未分配</option>
+                              {midCandidates.map((emp) => (
+                                <option key={`${day}-${emp}-mid`} value={emp}>
+                                  {emp}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-2xl border bg-white overflow-hidden">
+            <div className="px-4 py-3 border-b bg-gray-50 text-sm font-medium text-gray-700 flex items-center justify-between">
+              <span>筛选范围内班次预览</span>
+              <span className="text-xs text-gray-400">仅显示已勾选人员</span>
+            </div>
+            {safeDates.length === 0 || safeChecked.length === 0 ? (
+              <div className="p-4 text-xs text-gray-500">请选择人员并确保月份范围与当前排班有交集。</div>
+            ) : (
+              <div className="overflow-auto">
+                <table className="min-w-[620px] w-full text-sm">
+                  <thead className="bg-gray-50 text-gray-500">
+                    <tr>
+                      <th className="text-left py-2 px-3">日期</th>
+                      <th className="text-left py-2 px-3">星期</th>
+                      {safeChecked.map((emp) => (
+                        <th key={emp} className="text-left py-2 px-3">
+                          {emp}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {safeDates.map((day) => {
+                      const wk = safeWN[new Date(day).getDay()] || '';
+                      return (
+                        <tr key={`preview-${day}`} className="border-t hover:bg-gray-50">
+                          <td className="py-1.5 px-3 font-medium text-gray-700">{day}</td>
+                          <td className="py-1.5 px-3 text-gray-500">周{wk}</td>
+                          {safeChecked.map((emp) => {
+                            const shift = (data?.[day] || {})[emp] || '';
+                            const bg = shiftColors?.[shift] || '#f9fafb';
+                            return (
+                              <td key={`${day}-${emp}`} className="py-1.5 px-3">
+                                <span className="px-2 py-1 rounded-full text-xs" style={{ backgroundColor: bg }}>
+                                  {shift || '—'}
+                                </span>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-2xl border bg-white overflow-hidden">
+            <div className="px-4 py-3 border-b bg-gray-50 text-sm font-medium text-gray-700 flex items-center justify-between">
+              <span>人员审核时长统计</span>
+              <span className="text-xs text-gray-400">实时对齐白班/中班天数与小时</span>
+            </div>
+            {safeChecked.length === 0 ? (
+              <div className="p-4 text-xs text-gray-500">尚未勾选专辑审核人员。</div>
+            ) : (
+              <div className="overflow-auto">
+                <table className="min-w-[600px] w-full text-sm">
+                  <thead className="bg-gray-50 text-gray-500">
+                    <tr>
+                      <th className="text-left py-2 px-3">人员</th>
+                      <th className="text-right py-2 px-3">白班天数</th>
+                      <th className="text-right py-2 px-3">白班时长</th>
+                      <th className="text-right py-2 px-3">中班天数</th>
+                      <th className="text-right py-2 px-3">中班时长</th>
+                      <th className="text-right py-2 px-3">总时长</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {safeStats.map((row) => (
+                      <tr key={`stat-${row.emp}`} className="border-t hover:bg-gray-50">
+                        <td className="py-1.5 px-3 text-gray-700">{row.emp}</td>
+                        <td className="py-1.5 px-3 text-right">{row.whiteDays}</td>
+                        <td className="py-1.5 px-3 text-right">{row.whiteHours.toFixed(2)}</td>
+                        <td className="py-1.5 px-3 text-right">{row.midDays}</td>
+                        <td className="py-1.5 px-3 text-right">{row.midHours.toFixed(2)}</td>
+                        <td className="py-1.5 px-3 text-right font-medium">{row.totalHours.toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="bg-indigo-50/60 text-sm">
+                    <tr>
+                      <td className="py-2 px-3 font-medium text-gray-700">合计</td>
+                      <td className="py-2 px-3 text-right font-medium">{totals.whiteDays}</td>
+                      <td className="py-2 px-3 text-right font-medium">{totals.whiteHours.toFixed(2)}</td>
+                      <td className="py-2 px-3 text-right font-medium">{totals.midDays}</td>
+                      <td className="py-2 px-3 text-right font-medium">{totals.midHours.toFixed(2)}</td>
+                      <td className="py-2 px-3 text-right font-semibold text-indigo-700">{totals.totalHours.toFixed(2)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </Section>
+  );
+};
+
+// 员工管理视图，承担批量导入、偏好维护与清单展示
+const EmployeesSection = ({
+  employees = [],
+  restPrefs = {},
+  restForecast = {},
+  hasRestForecast = false,
+  empInput = '',
+  editingLocked = false,
+  restPairs = [],
+  onEmpInputChange,
+  onBulkAdd,
+  onRestPrefChange,
+  onRestPrefClear,
+  onDeleteEmployee,
+  onSave,
+}) => (
+  <Section
+    title="员工管理"
+    right={<span className="text-sm text-gray-500">休息偏好保存在服务器与本地（跨视图持久）</span>}
+  >
+    <div className="grid grid-cols-1">
+      <div className="mb-6">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-medium text-gray-700">周一至周日在岗人数预测</h3>
+          <span className="text-xs text-gray-400">仅统计已选择休息偏好的人员</span>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+          {['周一', '周二', '周三', '周四', '周五', '周六', '周日'].map((label, idx) => {
+            const day = idx + 1;
+            return (
+              <div
+                key={label}
+                className="rounded-2xl border bg-gradient-to-br from-white to-sky-50/60 p-3 text-center shadow-sm"
+              >
+                <div className="text-xs text-gray-500">{label}</div>
+                <div className="text-xl font-semibold text-sky-600">
+                  {restForecast?.[day] || 0}
+                  <span className="text-sm text-gray-500 ml-1">人</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        {!hasRestForecast && (
+          <div className="text-xs text-gray-500 mt-2">请选择休息偏好后即可实时看到在岗人数预测。</div>
+        )}
+      </div>
+      <div className="mb-4">
+        <label className="block text-sm text-gray-600 mb-1">批量添加（每行/逗号分隔）</label>
+        <div className="flex gap-2 items-start">
+          <textarea
+            className="flex-1 border rounded px-3 py-2 h-24"
+            value={empInput}
+            onCompositionStart={() => {}}
+            onCompositionEnd={(e) => onEmpInputChange && onEmpInputChange(e.target.value)}
+            onChange={(e) => onEmpInputChange && onEmpInputChange(e.target.value)}
+            placeholder="张三\n李四"
+          />
+          <PillBtn
+            onClick={() => onBulkAdd && onBulkAdd()}
+            disabled={editingLocked}
+            title={editingLocked ? '执行中：只读' : ''}
+          >
+            添加
+          </PillBtn>
+        </div>
+      </div>
+      <div className="overflow-auto">
+        <table className="text-sm min-w-[760px] w-full">
+          <thead>
+            <tr className="text-gray-500">
+              <th className="text-left">姓名</th>
+              <th className="text-left">本次休息偏好</th>
+              <th className="text-left">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {employees.map((e) => (
+              <tr key={e} className="border-t hover:bg-gray-50">
+                <td className="py-1">{e}</td>
+                <td className="py-1">
+                  <div className="flex items-center gap-2">
+                    {restPairs.map((p) => (
+                      <label
+                        key={p}
+                        className={`px-2 py-1 rounded border cursor-pointer ${
+                          restPrefs?.[e] === p ? 'bg-indigo-50 border-indigo-300 text-indigo-700' : 'hover:bg-gray-50'
+                        } ${editingLocked ? 'opacity-60 cursor-not-allowed' : ''}`}
+                      >
+                        <input
+                          type="radio"
+                          name={`rest-${e}`}
+                          disabled={editingLocked}
+                          className="mr-1"
+                          checked={restPrefs?.[e] === p}
+                          onChange={() => onRestPrefChange && onRestPrefChange(e, p)}
+                        />
+                        休{p}
+                      </label>
+                    ))}
+                    <button
+                      className={`px-2 py-1 rounded border ${editingLocked ? 'opacity-60 cursor-not-allowed' : ''}`}
+                      disabled={editingLocked}
+                      onClick={() => onRestPrefClear && onRestPrefClear(e)}
+                    >
+                      清除偏好
+                    </button>
+                  </div>
+                </td>
+                <td className="py-1">
+                  <button
+                    className={`text-red-600 ${editingLocked ? 'opacity-60 cursor-not-allowed' : ''}`}
+                    disabled={editingLocked}
+                    onClick={() => onDeleteEmployee && onDeleteEmployee(e)}
+                  >
+                    删除
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="mt-3">
+        <PillBtn
+          color="emerald"
+          onClick={() => onSave && onSave()}
+          disabled={editingLocked}
+          title={editingLocked ? '执行中：只读' : ''}
+        >
+          保存人员与偏好到服务器
+        </PillBtn>
+      </div>
+    </div>
+  </Section>
+);
+
+// 导出给入口脚本使用
+window.AppUI = {
+  Icon,
+  Spinner,
+  PillBtn,
+  Section,
+  SideDock,
+  TeamSwitcher,
+  LoginModal,
+  MonthInput,
+  BatchAssignSection,
+  ScheduleGridSection,
+  HistorySection,
+  SettingsSection,
+  AlbumSection,
+  EmployeesSection,
+};
