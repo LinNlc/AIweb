@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../core/Scheduler.php';
 require_once __DIR__ . '/../core/DTO.php';
 require_once __DIR__ . '/../core/Rules.php';
+require_once __DIR__ . '/../core/Repository.php';
 
 /**
  * 处理排班相关的 API 路由。
@@ -50,34 +51,14 @@ function schedule_fetch_latest(): void
     }
 
     $pdo = db();
-    $row = null;
-
-    if ($start && $end) {
-        $stmt = $pdo->prepare(
-            'SELECT id, team, employees, data, view_start, view_end, note, created_at, created_by_name, payload
-             FROM schedule_versions
-             WHERE team=? AND view_start=? AND view_end=?
-             ORDER BY id DESC LIMIT 1'
-        );
-        $stmt->execute([$team, $start, $end]);
-        $row = $stmt->fetch();
-    }
-
-    if (!$row) {
-        $stmt = $pdo->prepare(
-            'SELECT id, team, employees, data, view_start, view_end, note, created_at, created_by_name, payload
-             FROM schedule_versions
-             WHERE team=?
-             ORDER BY id DESC LIMIT 1'
-        );
-        $stmt->execute([$team]);
-        $row = $stmt->fetch();
-    }
+    $rangeStart = $start !== '' ? $start : null;
+    $rangeEnd = $end !== '' ? $end : null;
+    $row = repo_schedule_find_latest($pdo, $team, $rangeStart, $rangeEnd);
 
     if (!$row) {
         $viewStart = $start ?: date('Y-m-01');
         $viewEnd = $end ?: date('Y-m-t');
-        $historyProfile = compute_history_profile($pdo, $team, $start ?: null, $historyYearStart);
+        $historyProfile = compute_history_profile($pdo, $team, $rangeStart, $historyYearStart);
         send_json([
             'team' => $team,
             'viewStart' => $viewStart,
@@ -97,8 +78,8 @@ function schedule_fetch_latest(): void
     }
 
     $result = build_schedule_payload($row, $team);
-    $rangeStart = $start ?: ($row['view_start'] ?? null);
-    $result['historyProfile'] = compute_history_profile($pdo, $team, $rangeStart, $historyYearStart);
+    $profileStart = $rangeStart ?: ($row['view_start'] ?? null);
+    $result['historyProfile'] = compute_history_profile($pdo, $team, $profileStart, $historyYearStart);
     send_json($result);
 }
 
@@ -134,14 +115,7 @@ function schedule_save_version(): void
     $cleanInput['operator'] = $operator;
 
     $pdo = db();
-    $stmt = $pdo->prepare(
-        'SELECT id FROM schedule_versions
-         WHERE team=? AND view_start=? AND view_end=?
-         ORDER BY id DESC LIMIT 1'
-    );
-    $stmt->execute([$team, $viewStart, $viewEnd]);
-    $current = $stmt->fetch();
-    $latestId = $current ? (int) $current['id'] : null;
+    $latestId = repo_schedule_latest_id($pdo, $team, $viewStart, $viewEnd);
 
     if ($latestId !== null && $baseVersion !== null && (int) $baseVersion !== $latestId) {
         send_error('保存冲突：已有新版本', 409, [
@@ -166,22 +140,17 @@ function schedule_save_version(): void
         $dataJson = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR) ?: '{}';
     }
 
-    $insert = $pdo->prepare(
-        'INSERT INTO schedule_versions(team, view_start, view_end, employees, data, note, created_by_name, payload)
-         VALUES(?,?,?,?,?,?,?,?)'
-    );
-    $insert->execute([
-        $team,
-        $viewStart,
-        $viewEnd,
-        $employeesJson,
-        $dataJson,
-        $note,
-        $operator,
-        $snapshotJson,
+    $newId = repo_schedule_insert_version($pdo, [
+        'team' => $team,
+        'employees' => $employeesJson,
+        'data' => $dataJson,
+        'view_start' => $viewStart,
+        'view_end' => $viewEnd,
+        'note' => $note,
+        'created_at' => date('Y-m-d H:i:s'),
+        'created_by_name' => $operator,
+        'payload' => $snapshotJson,
     ]);
-
-    $newId = (int) $pdo->lastInsertId();
 
     append_progress_log([
         'team' => $team,

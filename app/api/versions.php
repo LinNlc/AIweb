@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../core/Scheduler.php';
 require_once __DIR__ . '/../core/DTO.php';
+require_once __DIR__ . '/../core/Repository.php';
 
 /**
  * 处理排班历史版本与导出相关的 API 路由。
@@ -43,43 +44,17 @@ function handle_versions_request(string $method, string $path): bool
 function versions_list(): void
 {
     $team = (string) ($_GET['team'] ?? 'default');
-    $start = (string) ($_GET['start'] ?? '');
-    $end = (string) ($_GET['end'] ?? '');
+    $start = trim((string) ($_GET['start'] ?? ''));
+    $end = trim((string) ($_GET['end'] ?? ''));
 
     if ($team === '') {
         send_error('参数缺失', 400);
     }
 
     $pdo = db();
-    $start = $start ?: '';
-    $end = $end ?: '';
-    $hasRange = $start !== '' && $end !== '' && strtotime($start) !== false && strtotime($end) !== false;
-
-    if ($hasRange && $start > $end) {
-        [$start, $end] = [$end, $start];
-    }
-
-    if ($hasRange) {
-        $stmt = $pdo->prepare(
-            'SELECT id, view_start, view_end, created_at, note, created_by_name'
-            . ' FROM schedule_versions'
-            . ' WHERE team=? AND view_start >= ? AND view_end <= ?'
-            . ' ORDER BY created_at DESC, id DESC'
-            . ' LIMIT 200'
-        );
-        $stmt->execute([$team, $start, $end]);
-    } else {
-        $stmt = $pdo->prepare(
-            'SELECT id, view_start, view_end, created_at, note, created_by_name'
-            . ' FROM schedule_versions'
-            . ' WHERE team=?'
-            . ' ORDER BY created_at DESC, id DESC'
-            . ' LIMIT 200'
-        );
-        $stmt->execute([$team]);
-    }
-
-    $rows = $stmt->fetchAll() ?: [];
+    $rangeStart = $start !== '' ? $start : null;
+    $rangeEnd = $end !== '' ? $end : null;
+    $rows = repo_schedule_list_versions($pdo, $team, $rangeStart, $rangeEnd);
     $versions = array_map(static function ($row) {
         return [
             'id' => (int) $row['id'],
@@ -106,12 +81,7 @@ function versions_fetch_by_id(): void
     }
 
     $pdo = db();
-    $stmt = $pdo->prepare(
-        'SELECT id, team, employees, data, view_start, view_end, note, created_at, created_by_name, payload'
-        . ' FROM schedule_versions WHERE id = ? LIMIT 1'
-    );
-    $stmt->execute([$id]);
-    $row = $stmt->fetch();
+    $row = repo_schedule_fetch_by_id($pdo, $id);
 
     if (!$row) {
         send_error('未找到', 404);
@@ -139,10 +109,9 @@ function versions_delete(): void
     }
 
     $pdo = db();
-    $stmt = $pdo->prepare('DELETE FROM schedule_versions WHERE id = ? AND team = ?');
-    $stmt->execute([$id, $team]);
+    $deleted = repo_schedule_delete($pdo, $id, $team);
 
-    if ($stmt->rowCount() === 0) {
+    if (!$deleted) {
         send_error('记录不存在或已删除', 404);
     }
 
@@ -156,21 +125,15 @@ function versions_delete(): void
 function versions_export_spreadsheet(): void
 {
     $team = (string) ($_GET['team'] ?? 'default');
-    $start = (string) ($_GET['start'] ?? '');
-    $end = (string) ($_GET['end'] ?? '');
+    $start = trim((string) ($_GET['start'] ?? ''));
+    $end = trim((string) ($_GET['end'] ?? ''));
 
     if ($team === '' || $start === '' || $end === '') {
         send_error('参数缺失', 400);
     }
 
     $pdo = db();
-    $stmt = $pdo->prepare(
-        'SELECT employees, data FROM schedule_versions'
-        . ' WHERE team=? AND view_start=? AND view_end=?'
-        . ' ORDER BY id DESC LIMIT 1'
-    );
-    $stmt->execute([$team, $start, $end]);
-    $row = $stmt->fetch();
+    $row = repo_schedule_find_by_range($pdo, $team, $start, $end);
 
     $employees = $row ? (json_decode($row['employees'], true) ?: []) : [];
     $data = $row ? (json_decode($row['data'], true) ?: []) : [];
