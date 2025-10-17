@@ -87,7 +87,8 @@ const {
   useOrgConfigState,
   useTeamStateMap,
   useProgressLog,
-  useProgressTracker
+  useProgressTracker,
+  createRestPreferenceStore
 } = AppState;
 
 function App(){
@@ -261,14 +262,20 @@ function App(){
     setTeamStateMap(prev=> ({ ...prev, [team]: snapshot }));
   }, [team, start, end, employees, data, versionId, shiftColors, staffingAlerts, adminDays, restPrefs, nightWindows, nightOverride, nightRules, rMin, rMax, pMin, pMax, mixMax, note, batchChecked, albumSelected, albumWhiteHour, albumMidHour, albumRangeStartMonth, albumRangeEndMonth, albumMaxDiff, albumAssignments, albumAutoNote, albumHistory, historyProfile, yearlyOptimize]);
 
-  const REST_STORE_KEY = 'scheduler_restprefs_store_v2';
-  function restStoreKey(team,start,end){ return `${team}__${start}__${end}`; }
-  function loadRestStore(){ try{ return JSON.parse(localStorage.getItem(REST_STORE_KEY)||'{}'); }catch{ return {}; } }
-  function saveRestStore(map){ try{ localStorage.setItem(REST_STORE_KEY, JSON.stringify(map||{})); }catch{} }
-  function saveRestForView(){ const map = loadRestStore(); map[restStoreKey(team,start,end)] = restPrefs; saveRestStore(map); }
-  function tryRestoreRestForView(){ const map = loadRestStore(); const hit = map[restStoreKey(team,start,end)]; if(hit && Object.keys(hit).length){ setRestPrefs(sanitizeRestPrefsMap(hit)); } }
+  const restPrefStore = useMemo(() => createRestPreferenceStore({ sanitizeRestPrefsMap }), [sanitizeRestPrefsMap]);
+  function saveRestForView(){ restPrefStore.save({ team, start, end, prefs: restPrefs }); }
+  function restoreRestForView(target = {}){
+    const cached = restPrefStore.load({
+      team: target.team !== undefined ? target.team : team,
+      start: target.start !== undefined ? target.start : start,
+      end: target.end !== undefined ? target.end : end
+    });
+    if(cached && Object.keys(cached).length){
+      setRestPrefs(cached);
+    }
+  }
   useEffect(()=>{ if(Object.keys(restPrefs||{}).length) saveRestForView(); }, [restPrefs, team, start, end]);
-  useEffect(()=>{ tryRestoreRestForView(); }, [team, start, end]);
+  useEffect(()=>{ restoreRestForView(); }, [team, start, end]);
 
   const teamsList = orgConfig.teams || [];
   const accountConfig = useMemo(()=>{
@@ -507,8 +514,12 @@ function App(){
     };
     const viewStart = get('viewStart','view_start','start');
     const viewEnd = get('viewEnd','view_end','end');
-    if(typeof viewStart === 'string' && viewStart){ setStart(viewStart.slice(0,10)); }
-    if(typeof viewEnd === 'string' && viewEnd){ setEnd(viewEnd.slice(0,10)); }
+    const teamId = get('team','team_id');
+    const nextStart = (typeof viewStart === 'string' && viewStart) ? viewStart.slice(0,10) : start;
+    const nextEnd = (typeof viewEnd === 'string' && viewEnd) ? viewEnd.slice(0,10) : end;
+    if(typeof teamId === 'string' && teamId.trim()){ setTeam(teamId.trim()); }
+    if(nextStart){ setStart(nextStart); }
+    if(nextEnd){ setEnd(nextEnd); }
     const version = get('versionId','version_id');
     if(version){ setVersionId(version); }
     const employeesPayload = get('employees');
@@ -585,7 +596,7 @@ function App(){
       const enabled = yearlyOptimizePayload === true || yearlyOptimizePayload === 1 || yearlyOptimizePayload === '1';
       setYearlyOptimize(enabled);
     }
-    tryRestoreRestForView();
+    restoreRestForView({ team: teamId, start: nextStart, end: nextEnd });
   }
   async function loadFromServer(){
     try {

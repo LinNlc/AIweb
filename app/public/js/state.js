@@ -71,6 +71,7 @@ const defaultStaffingAlerts = {
   white: { threshold: 0, lowColor: '#fef3c7', highColor: '#bfdbfe' },
   mid1: { threshold: 0, lowColor: '#fef3c7', highColor: '#bae6fd' }
 };
+const REST_PREF_STORAGE_KEY = 'scheduler_restprefs_store_v2';
 const normalizeRestPair = (pair) => pair === '17' ? '71' : pair;
 function sanitizeRestPairValue(val) {
   if (!val) return '';
@@ -817,6 +818,74 @@ function writeJSONToStorage(key, value) {
   }
 }
 
+/**
+ * 休息偏好缓存：在本地存储保留同一团队 + 时间范围下的配置信息
+ * 入口层可通过该工厂方法获得读写函数，避免在组件中直接拼接 key。
+ */
+function createRestPreferenceStore({ storageKey = REST_PREF_STORAGE_KEY, sanitizeRestPrefsMap: sanitizeFn } = {}) {
+  const sanitize = typeof sanitizeFn === 'function' ? sanitizeFn : (value) => sanitizeRestPrefsMap(value);
+  const buildKey = (team, start, end) => {
+    const safeTeam = (team || 'default').trim() || 'default';
+    const safeStart = start || '1970-01-01';
+    const safeEnd = end || '1970-01-01';
+    return `${safeTeam}__${safeStart}__${safeEnd}`;
+  };
+  const readAll = () => {
+    const stored = readJSONFromStorage(storageKey, {});
+    return stored && typeof stored === 'object' ? stored : {};
+  };
+  const writeAll = (map) => {
+    writeJSONToStorage(storageKey, map);
+  };
+
+  return {
+    /**
+     * 读取指定团队与起止日期对应的缓存，并返回经过清洗后的结果。
+     */
+    load({ team, start, end } = {}) {
+      const map = readAll();
+      const key = buildKey(team, start, end);
+      const hit = map[key];
+      if (!hit || typeof hit !== 'object') return null;
+      const cleaned = sanitize(hit);
+      return Object.keys(cleaned).length ? cleaned : null;
+    },
+    /**
+     * 写入缓存；如传入空对象则清除对应缓存，确保 localStorage 不会无限膨胀。
+     */
+    save({ team, start, end, prefs } = {}) {
+      const map = readAll();
+      const key = buildKey(team, start, end);
+      if (!prefs || !Object.keys(prefs).length) {
+        delete map[key];
+      } else {
+        map[key] = sanitize(prefs);
+      }
+      writeAll(map);
+    },
+    /**
+     * 清理某个团队的所有缓存项，供入口层在团队删除时调用。
+     */
+    clearTeam(team) {
+      const map = readAll();
+      const safeTeam = (team || 'default').trim() || 'default';
+      const next = {};
+      Object.entries(map).forEach(([key, value]) => {
+        if (!key.startsWith(`${safeTeam}__`)) {
+          next[key] = value;
+        }
+      });
+      writeAll(next);
+    },
+    /**
+     * 暴露底层原始数据，便于调试或导出。
+     */
+    dump() {
+      return readAll();
+    }
+  };
+}
+
 function useOrgConfigState({ apiGet, apiPost, normalizeOrgConfig, storageKey = ORG_STORAGE_KEY, debounceMs = 400 }) {
   const [orgConfig, setOrgConfig] = useState(() => {
     const stored = readJSONFromStorage(storageKey, null);
@@ -1117,5 +1186,6 @@ window.AppState = {
   useOrgConfigState,
   useTeamStateMap,
   useProgressLog,
-  useProgressTracker
+  useProgressTracker,
+  createRestPreferenceStore
 };
