@@ -190,14 +190,19 @@
 - `app/api/versions.php` 的导出接口改为调用核心导出模块，API 层仅负责数据查询与参数校验，进一步压缩控制器体积。
 - 文档同步更新完成度、整体结构速览与文件职责表，记录导出能力独立后的模块边界。
 
+## 2025-10-14 第 22 步
+- 新建 `app/core/ScheduleService.php`，集中封装排班查询/保存流程与乐观锁校验，暴露纯业务函数供 API 层调用。
+- `app/api/schedule.php` 精简为参数提取 + 服务调用，冲突、校验等异常交由服务层抛出，接口仅负责 JSON 响应。
+- 在本文档更新完成度至 95%，同时扩充文件职责表纳入新服务模块，便于后续聚焦统计/权限拆分。
+
 ### 拆分总体进度速览
 - **后端接口**：`schedule.php`、`versions.php`、`auth.php`、`org_config.php`、`progress.php` 均已独立，下一步评估导出/统计专用接口及鉴权强化。
 - **核心算法层**：`Scheduler.php`、`Rules.php`、`DTO.php`、`Utils.php` 已抽离，`Repository.php` 统一管理排班版本数据访问，新增的 `OrgConfig.php`、`Storage.php`/`Progress.php` 与 `Exporter.php` 划分了配置、日志与导出职责。
 - **前端静态资源**：`state.js` 现负责常量、校验与状态 Hook；`ui.js` 覆盖所有 React 视图；`api.js` 管理请求封装；`main.js` 专注于业务流程与组件拼装。
 - **配置与存储**：`config/app.php`、`storage/` 结构稳定，进度日志已落地至 JSONL，仍需完善导出/备份策略。
-- **完成度**：约 94%，后端与前端主体拆分完成，后续聚焦日志可视化、统计面板与权限策略细化。
+- **完成度**：约 95%，后端与前端主体拆分完成，后续聚焦日志可视化、统计面板与权限策略细化。
 
-### 现有程序结构与职责（第 21 步更新）
+### 现有程序结构与职责（第 22 步更新）
 
 | 文件 | 核心作用 | 备注/注释 |
 | --- | --- | --- |
@@ -219,6 +224,7 @@
 | `app/core/Scheduler.php` | 排班算法辅助 | 提供历史统计、自动排班相关的算法函数 |
 | `app/core/Repository.php` | 数据访问仓储 | 封装排班版本的查询、插入、删除与列表逻辑 |
 | `app/core/Exporter.php` | 导出工具模块 | 构建表格矩阵并输出 XLSX/CSV 附件 |
+| `app/core/ScheduleService.php` | 排班服务模块 | 汇总排班查询与保存流程，处理乐观锁并追加进度日志 |
 | `app/public/index.html` | 前端入口页面 | 负责加载 React、Babel 以及拆分后的脚本资源 |
 | `app/public/js/api.js` | 前端请求层 | 暴露 `apiGet`、`apiPost`、进度日志工具等方法 |
 | `app/public/js/state.js` | 状态与业务工具 | 提供常量、校验函数、调度流程与 `use*` Hook |
