@@ -220,41 +220,89 @@
 - `app/public/js/main.js` 改用新 Hook 驱动批量排班与专辑审核的选择列表，并复用统一提示条逻辑，入口文件仅关注业务流程与回调。
 - 进度文档同步更新完成度与职责表，确认前端状态层覆盖提示、缓存与选择管理，后续可聚焦剩余优化。
 
-### 拆分总体进度速览
-- **后端接口**：`schedule.php`、`versions.php`、`auth.php`、`org_config.php`、`progress.php` 均已独立，下一步评估导出/统计专用接口及鉴权强化。
-- **核心算法层**：`Scheduler.php`（自动排班入口占位）、`History.php`（历史统计）、`Rules.php`、`Validation.php`、`DTO.php`、`Utils.php` 已抽离，`Repository.php` 统一管理排班版本数据访问，`OrgConfig.php`、`Storage.php`/`Progress.php` 与 `Exporter.php` 划分了配置、日志与导出职责。
-- **前端静态资源**：`state.js` 负责常量、校验、进度、休息偏好缓存、提示条与人员选择 Hook；`ui.js` 覆盖所有 React 视图；`api.js` 管理请求封装；`main.js` 仅串联业务流程与组件。
-- **配置与存储**：`config/app.php`、`storage/` 结构稳定，进度日志已落地至 JSONL，仍需完善导出/备份策略。
-- **完成度**：约 99.5%，后端与前端主体拆分完成，后续聚焦日志可视化、统计面板与权限策略细化。
+## 2025-10-14 第 28 步
+- 复核已拆分模块，将排班服务、仓储、日志、导出与前端状态/组件层的职责再次校验，确认所有入口文件均通过模块调用完成业务流程。
+- 为现有目录编写带中文注释的结构清单，逐项说明各文件用途，方便后续维护与新成员快速理解系统分层。
+- 更新总体进度为 100%，记录最终阶段的拆分成果并标注仍可优化的方向（如自动排班算法深化、权限体系拓展等）。
 
-### 现有程序结构与职责（第 27 步更新）
+### 拆分总体进度速览
+- **后端接口**：`schedule.php`、`versions.php`、`auth.php`、`org_config.php`、`progress.php` 等接口均按职责拆分并复用统一的 HTTP/存储工具，后续可进一步强化鉴权与限流。
+- **核心算法层**：`Scheduler.php` 保留排班算法入口，`ScheduleService.php`、`Repository.php`、`Rules.php`、`Validation.php`、`History.php`、`Exporter.php` 等模块各司其职，形成查询、校验、统计、导出的分层闭环。
+- **前端静态资源**：`state.js` 集中管理常量、Hook 与业务流程，`ui.js` 承载所有 React 组件，`api.js` 负责请求封装，`main.js` 负责装配状态与视图，模块边界明确。
+- **配置与存储**：`config/app.php`、`storage/` 目录与 `Storage.php`、`Progress.php` 工具协同，确保数据库、日志、导出文件井然有序。
+- **完成度**：**100%**，模块化拆分已按计划收官，可在此基础上继续迭代算法、报表与权限策略。
+
+### 现有程序结构与职责（第 28 步更新）
 
 | 文件 | 核心作用 | 备注/注释 |
 | --- | --- | --- |
-| `index.php` | 后端入口，统一派发 API 与静态页面 | 处理 404/OPTIONS，所有接口在此注册 |
-| `app/bootstrap.php` | 初始化配置、时区、数据库路径 | 被入口与 API 引用，确保环境一致 |
-| `app/config/app.php` | 全局配置项 | 包含时区、数据库与日志目录等常量 |
-| `app/api/schedule.php` | 排班读取/保存接口 | 调用核心规则校验并写入进度日志，返回 JSON |
-| `app/api/versions.php` | 历史版本接口 | 管理版本查询、导出、删除与导入 |
-| `app/api/progress.php` | 调度进度接口 | 读取/追加 `storage/logs/progress.jsonl` |
-| `app/api/auth.php` | 登录占位接口 | 维持前端登录流程所需的固定响应 |
-| `app/api/org_config.php` | 组织配置接口 | 负责组织配置的获取与持久化 |
-| `app/core/Utils.php` | 核心工具集 | 提供 SQLite 连接、日期处理等通用能力 |
-| `app/core/OrgConfig.php` | 组织配置核心模块 | 规范配置载荷并负责 JSON 编解码与数据库写入 |
-| `app/core/Http.php` | HTTP 工具模块 | 解析 JSON 请求体，统一 JSON 成功/错误响应 |
-| `app/core/Storage.php` | 存储目录辅助 | 解析数据库同级目录并自动创建 logs/exports 等路径 |
-| `app/core/Progress.php` | 进度日志工具 | 负责进度 JSONL 的读取与写入 |
-| `app/core/Rules.php` | 业务规则模块 | 组合排班保存时的整体验证流程 |
-| `app/core/Validation.php` | 数据归一化工具 | 提供团队、日期、成员列表与排班矩阵的基础清洗函数 |
-| `app/core/DTO.php` | 数据装配模块 | 将数据库结果转换为排班 DTO/快照 |
-| `app/core/Scheduler.php` | 排班算法入口 | 保留自动排班占位实现，后续扩展核心算法 |
-| `app/core/History.php` | 历史统计模块 | 负责排班历史数据的统计与概览生成 |
-| `app/core/Repository.php` | 数据访问仓储 | 封装排班版本的查询、插入、删除与列表逻辑 |
-| `app/core/Exporter.php` | 导出工具模块 | 构建表格矩阵并输出 XLSX/CSV 附件 |
-| `app/core/ScheduleService.php` | 排班服务模块 | 汇总排班查询与保存流程，处理乐观锁并追加进度日志 |
-| `app/public/index.html` | 前端入口页面 | 负责加载 React、Babel 以及拆分后的脚本资源 |
-| `app/public/js/api.js` | 前端请求层 | 暴露 `apiGet`、`apiPost`、进度日志工具等方法 |
-| `app/public/js/state.js` | 状态与业务工具 | 提供常量、校验、调度流程、休息偏好缓存工厂、提示条/人员选择 Hook 以及进度/配置等 `use*` Hook |
-| `app/public/js/ui.js` | UI 组件库 | 聚合导航、排班表格、员工管理等 React 组件 |
-| `app/public/js/main.js` | 应用入口 | 消费状态 Hook/缓存工厂，负责事件处理与视图组合，现已复用统一提示与选择状态 |
-| `docs/progress.md` | 拆分记录 | 追踪阶段性成果、目录结构与完成度 |
+| `index.php` | 后端入口，统一派发 API 与静态页面 | 注册所有接口路由，兜底 404/OPTIONS 响应，文件内含中文提示 |
+| `app/bootstrap.php` | 初始化配置、时区、数据库路径 | 引导配置加载、错误显示与自动加载模块，注释说明加载顺序 |
+| `app/config/app.php` | 全局配置项 | 暴露时区、SQLite 文件、日志目录、调试开关等常量，附字段注释 |
+| `app/api/schedule.php` | 排班读取/保存接口 | 负责路由匹配、参数归一化，调用服务层与进度日志，函数均有用途注释 |
+| `app/api/versions.php` | 历史版本接口 | 包含列表、详情、导出、删除等入口，中文注释指明每个操作的行为 |
+| `app/api/progress.php` | 调度进度接口 | 读取/追加进度 JSONL，说明请求/响应格式及错误处理 |
+| `app/api/auth.php` | 登录占位接口 | 提供固定的登录/登出/当前用户响应，标注无鉴权场景 |
+| `app/api/org_config.php` | 组织配置接口 | 委托核心模块处理配置持久化，注释说明输入输出字段 |
+| `app/core/Http.php` | HTTP 工具模块 | 封装 JSON 输入与响应函数，函数注释覆盖必填参数与返回结构 |
+| `app/core/Utils.php` | 核心工具集 | 管理 SQLite 连接、日期工具、随机数等，中文注释记录复用场景 |
+| `app/core/Storage.php` | 存储目录辅助 | 统一拼装日志、导出目录并确保存在，提供路径注释 |
+| `app/core/Progress.php` | 进度日志工具 | 读取/写入 JSONL，说明日志字段及调用方式 |
+| `app/core/Validation.php` | 数据归一化工具 | 标注团队、日期、成员、矩阵的校验逻辑，供多模块共享 |
+| `app/core/Rules.php` | 业务规则模块 | 聚焦排班规则组合校验，描述强制/软性规则含义 |
+| `app/core/DTO.php` | 数据装配模块 | 将数据库行转换为业务 DTO，附字段含义注释 |
+| `app/core/Repository.php` | 数据访问仓储 | 集中 SQL 语句与 CRUD，注释覆盖每个查询的过滤条件 |
+| `app/core/History.php` | 历史统计模块 | 组装历史概览数据结构，解释统计口径 |
+| `app/core/ScheduleService.php` | 排班服务模块 | 桥接 API 与核心层，注释说明保存流程的乐观锁策略 |
+| `app/core/Scheduler.php` | 排班算法入口 | 占位未来算法实现，现含默认说明注释 |
+| `app/core/OrgConfig.php` | 组织配置核心模块 | 处理配置 JSON 编解码与默认值合并，注释示例字段 |
+| `app/core/Exporter.php` | 导出工具模块 | 构建导出矩阵与 CSV/XLSX 输出策略，注释说明回退逻辑 |
+| `app/public/index.html` | 前端入口页面 | 说明脚本加载顺序与依赖关系，并挂载 React 容器 |
+| `app/public/js/api.js` | 前端请求层 | 统一封装 GET/POST/进度日志 API，注释描述返回 Promise 结构 |
+| `app/public/js/state.js` | 状态与业务工具 | 汇聚常量、校验、调度流程、Hook、缓存工厂，含大量中文说明 |
+| `app/public/js/ui.js` | UI 组件库 | 导出导航、排班表格、批量排班、历史/设置/员工等组件，注释解释交互 |
+| `app/public/js/main.js` | 应用入口 | 装配各 Hook 与组件、负责事件处理与日志联动，重要步骤配有注释 |
+| `docs/progress.md` | 拆分记录 | 本文件，记录阶段成果、目录结构与完成度 |
+
+### 现有目录结构（含注释）
+
+```text
+index.php                         # PHP 入口，派发 API 与静态资源
+app/
+  bootstrap.php                   # 初始化运行环境并加载核心模块
+  config/
+    app.php                       # 全局配置数组（时区、数据库、日志目录等）
+  api/
+    auth.php                      # 登录占位接口
+    org_config.php                # 组织配置读写接口
+    progress.php                  # 排班进度日志接口
+    schedule.php                  # 排班读取/保存接口
+    versions.php                  # 历史版本/导出接口
+  core/
+    DTO.php                       # 数据传输对象装配
+    Exporter.php                  # 排班导出工具
+    History.php                   # 历史统计辅助
+    Http.php                      # JSON 请求/响应工具
+    OrgConfig.php                 # 组织配置持久化与规范化
+    Progress.php                  # 进度日志存取
+    Repository.php                # 排班版本仓储
+    Rules.php                     # 排班规则集合
+    ScheduleService.php           # 排班服务层
+    Scheduler.php                 # 自动排班占位算法
+    Storage.php                   # 存储目录解析工具
+    Utils.php                     # 数据库与通用工具函数
+    Validation.php                # 数据归一化校验
+  public/
+    index.html                    # 浏览器端入口页面
+    js/
+      api.js                      # Fetch/请求封装
+      main.js                     # React 入口脚本
+      state.js                    # 共享状态与业务 Hook
+      ui.js                       # React UI 组件集合
+  storage/
+    app.db                        # SQLite 数据库文件
+    exports/                      # 导出文件目录
+    logs/                         # 进度/操作日志目录
+docs/
+  progress.md                     # 拆分进度与结构说明
+```
